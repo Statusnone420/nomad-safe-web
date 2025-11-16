@@ -87,9 +87,9 @@ function formatNoiseLevel(noise) {
             return "Loud but steady";
         case "party":
             return "Party / unpredictable";
-        case "medium": // legacy
+        case "medium":
             return "Medium";
-        case "noisy": // legacy
+        case "noisy":
             return "Noisy";
         default:
             return "Unknown";
@@ -185,6 +185,9 @@ function App() {
     const mapRef = useRef(null);
     const center = [39.5, -98.35]; // Center of US
 
+    // Mobile / drawer: just "open" or "closed", CSS handles mobile vs desktop
+    const [isSheetOpen, setIsSheetOpen] = useState(false);
+
     /* ---------- EFFECTS ---------- */
 
     // Load spots + reviews
@@ -208,19 +211,16 @@ function App() {
                 setStatus("Error loading spots: " + spotsRes.error.message);
                 alert("Error loading spots: " + spotsRes.error.message);
             } else {
-                // Normalize photo_urls so it is always an array
                 const normalizedSpots = (spotsRes.data || []).map((spot) => {
                     let photo_urls = spot.photo_urls;
 
                     if (Array.isArray(photo_urls)) {
-                        // ok as-is
+                        // ok
                     } else if (
                         typeof photo_urls === "string" &&
                         photo_urls.trim().length > 0
                     ) {
-                        // handle legacy comma-separated string
                         try {
-                            // if it's actually JSON, parse it; otherwise treat as CSV
                             const maybeJson = JSON.parse(photo_urls);
                             if (Array.isArray(maybeJson)) {
                                 photo_urls = maybeJson;
@@ -245,8 +245,8 @@ function App() {
 
                 setSpots(normalizedSpots);
                 setStatus(
-                    `Connected. Spots: ${normalizedSpots.length || 0
-                    }, Reviews: ${reviewsRes.data?.length || 0}`
+                    `Connected. Spots: ${normalizedSpots.length || 0}, Reviews: ${reviewsRes.data?.length || 0
+                    }`
                 );
             }
 
@@ -414,6 +414,7 @@ function App() {
         setSpotForm(initialSpotForm);
         setSpotPhotoFiles([]);
         setErrorMsg("");
+        setIsSheetOpen(true); // open drawer (on mobile) or just keep sidebar visible
     }
 
     function cancelAddOrEdit() {
@@ -423,6 +424,7 @@ function App() {
         setSpotForm(initialSpotForm);
         setSpotPhotoFiles([]);
         setErrorMsg("");
+        setIsSheetOpen(false);
     }
 
     function handleMapClick(lat, lng) {
@@ -480,7 +482,6 @@ function App() {
         const noise_level = spotForm.noiseLevel || "unknown";
         const spot_type = spotForm.spotType || "other";
 
-        // Text URLs
         let photo_urls = [];
         if (spotForm.photoUrls.trim()) {
             photo_urls = spotForm.photoUrls
@@ -489,7 +490,6 @@ function App() {
                 .filter(Boolean);
         }
 
-        // Upload any selected files to Supabase storage
         let uploadedUrls = [];
         if (spotPhotoFiles.length > 0) {
             setUploadingPhotos(true);
@@ -551,7 +551,6 @@ function App() {
 
         let result;
         if (editingSpotId) {
-            // UPDATE existing spot
             result = await supabase
                 .from("spots")
                 .update(payload)
@@ -559,7 +558,6 @@ function App() {
                 .select()
                 .single();
         } else {
-            // INSERT new spot
             result = await supabase
                 .from("spots")
                 .insert({
@@ -589,7 +587,13 @@ function App() {
         }
 
         setSelectedSpotId(savedSpot.id);
-        cancelAddOrEdit();
+        setIsSheetOpen(true);
+        setAdding(false);
+        setEditingSpotId(null);
+        setPendingLocation(null);
+        setSpotForm(initialSpotForm);
+        setSpotPhotoFiles([]);
+        setErrorMsg("");
     }
 
     async function handleAddReview(e) {
@@ -727,9 +731,12 @@ function App() {
                 ? spot.photo_urls.join(", ")
                 : "",
         });
+
+        setIsSheetOpen(true);
     }
 
-    const appClassName = darkMode ? "app glass dark" : "app glass";
+    const appClassName = `${darkMode ? "app glass dark" : "app glass"}${isSheetOpen ? " mobile-sheet-open" : ""
+        }`;
 
     return (
         <div className={appClassName}>
@@ -846,7 +853,7 @@ function App() {
                     </button>
                 </div>
 
-                {/* Map / Satellite toggle – moved into header so it doesn't cover the map */}
+                {/* Map / Satellite toggle */}
                 <div className="map-layer-toggle-row">
                     <div className="map-layer-toggle">
                         <button
@@ -908,7 +915,16 @@ function App() {
                                     key={spot.id}
                                     position={[spot.lat, spot.lng]}
                                     eventHandlers={{
-                                        click: () => setSelectedSpotId(spot.id),
+                                        click: () => {
+                                            setSelectedSpotId(spot.id);
+                                            setIsSheetOpen(true);
+                                            if (mapRef.current) {
+                                                mapRef.current.setView(
+                                                    [spot.lat, spot.lng],
+                                                    14
+                                                );
+                                            }
+                                        },
                                     }}
                                 >
                                     <Popup>
@@ -994,7 +1010,7 @@ function App() {
                     </div>
                 </div>
 
-                {/* Right-hand column: list + details/reviews/account */}
+                {/* Right-hand column / mobile drawer content */}
                 <div className="side-column">
                     {/* Spot list panel */}
                     <aside className="spot-list-panel">
@@ -1027,6 +1043,7 @@ function App() {
                                                     14
                                                 );
                                             }
+                                            setIsSheetOpen(true);
                                         }}
                                     >
                                         <div className="spot-list-item-main">
@@ -1177,7 +1194,9 @@ function App() {
                                             <label>
                                                 <input
                                                     type="checkbox"
-                                                    checked={spotForm.overnightAllowed}
+                                                    checked={
+                                                        spotForm.overnightAllowed
+                                                    }
                                                     onChange={(e) =>
                                                         setSpotForm((prev) => ({
                                                             ...prev,
@@ -1213,7 +1232,9 @@ function App() {
                                                 <select
                                                     name="cellSignal"
                                                     value={spotForm.cellSignal}
-                                                    onChange={handleSpotInputChange}
+                                                    onChange={
+                                                        handleSpotInputChange
+                                                    }
                                                 >
                                                     <option value="0">
                                                         0 – no service at all
@@ -1240,7 +1261,9 @@ function App() {
                                                 <select
                                                     name="safetyRating"
                                                     value={spotForm.safetyRating}
-                                                    onChange={handleSpotInputChange}
+                                                    onChange={
+                                                        handleSpotInputChange
+                                                    }
                                                 >
                                                     <option value="0">
                                                         0 – would rather sleep at my in-laws
@@ -1323,7 +1346,9 @@ function App() {
                                         </div>
 
                                         {errorMsg && (
-                                            <p className="error-text">{errorMsg}</p>
+                                            <p className="error-text">
+                                                {errorMsg}
+                                            </p>
                                         )}
 
                                         <div className="form-actions">
@@ -1331,14 +1356,20 @@ function App() {
                                                 type="button"
                                                 className="btn-secondary"
                                                 onClick={cancelAddOrEdit}
-                                                disabled={savingSpot || uploadingPhotos}
+                                                disabled={
+                                                    savingSpot ||
+                                                    uploadingPhotos
+                                                }
                                             >
                                                 Cancel
                                             </button>
                                             <button
                                                 type="submit"
                                                 className="btn-primary"
-                                                disabled={savingSpot || uploadingPhotos}
+                                                disabled={
+                                                    savingSpot ||
+                                                    uploadingPhotos
+                                                }
                                             >
                                                 {uploadingPhotos
                                                     ? "Uploading photos…"
@@ -1360,7 +1391,9 @@ function App() {
                                 <div className="sheet-title-row">
                                     <div className="sheet-title-main">
                                         <h2 className="sheet-title">
-                                            {getSpotTypeIcon(selectedSpot.spot_type)}{" "}
+                                            {getSpotTypeIcon(
+                                                selectedSpot.spot_type
+                                            )}{" "}
                                             {selectedSpot.name}
                                         </h2>
                                         <button
@@ -1370,7 +1403,9 @@ function App() {
                                                     : ""
                                                 }`}
                                             onClick={() =>
-                                                toggleFavorite(selectedSpot.id)
+                                                toggleFavorite(
+                                                    selectedSpot.id
+                                                )
                                             }
                                             aria-label={
                                                 isFavorite(selectedSpot.id)
@@ -1384,7 +1419,10 @@ function App() {
                                     <button
                                         type="button"
                                         className="sheet-close"
-                                        onClick={() => setSelectedSpotId(null)}
+                                        onClick={() => {
+                                            setSelectedSpotId(null);
+                                            setIsSheetOpen(false);
+                                        }}
                                         aria-label="Close details"
                                     >
                                         ✕
@@ -1406,7 +1444,9 @@ function App() {
                                     <span>
                                         Cell: {selectedSpot.cell_signal ?? 0}/5 · Safety:{" "}
                                         {selectedSpot.safety_rating ?? 0}/5 · Noise:{" "}
-                                        {formatNoiseLevel(selectedSpot.noise_level)}
+                                        {formatNoiseLevel(
+                                            selectedSpot.noise_level
+                                        )}
                                     </span>
                                 </div>
 
@@ -1437,12 +1477,13 @@ function App() {
                                     <button
                                         type="button"
                                         className="btn-secondary"
-                                        onClick={() => openSpotInMaps(selectedSpot)}
+                                        onClick={() =>
+                                            openSpotInMaps(selectedSpot)
+                                        }
                                     >
                                         Open in Maps
                                     </button>
 
-                                    {/* Edit button only for owner */}
                                     {session &&
                                         selectedSpot.created_by &&
                                         session.user?.id ===
@@ -1451,7 +1492,9 @@ function App() {
                                                 type="button"
                                                 className="btn-secondary"
                                                 onClick={() =>
-                                                    beginEditingSpot(selectedSpot)
+                                                    beginEditingSpot(
+                                                        selectedSpot
+                                                    )
                                                 }
                                             >
                                                 Edit spot
@@ -1467,35 +1510,46 @@ function App() {
                                         </p>
                                     )}
 
-                                    {selectedSpotReviews.slice(0, 6).map((rev) => (
-                                        <div key={rev.id} className="review-card">
-                                            <div className="review-header">
-                                                <span className="review-rating">
-                                                    {"⭐".repeat(rev.rating || 0)}
-                                                </span>
-                                                <span className="review-name">
-                                                    {rev.nickname || "Anon"}
-                                                </span>
-                                                <span className="review-date">
-                                                    {rev.created_at
-                                                        ? new Date(
-                                                            rev.created_at
-                                                        ).toLocaleDateString()
-                                                        : ""}
-                                                </span>
+                                    {selectedSpotReviews
+                                        .slice(0, 6)
+                                        .map((rev) => (
+                                            <div
+                                                key={rev.id}
+                                                className="review-card"
+                                            >
+                                                <div className="review-header">
+                                                    <span className="review-rating">
+                                                        {"⭐".repeat(
+                                                            rev.rating || 0
+                                                        )}
+                                                    </span>
+                                                    <span className="review-name">
+                                                        {rev.nickname ||
+                                                            "Anon"}
+                                                    </span>
+                                                    <span className="review-date">
+                                                        {rev.created_at
+                                                            ? new Date(
+                                                                rev
+                                                                    .created_at
+                                                            ).toLocaleDateString()
+                                                            : ""}
+                                                    </span>
+                                                </div>
+                                                <p className="review-comment">
+                                                    {rev.comment}
+                                                </p>
                                             </div>
-                                            <p className="review-comment">
-                                                {rev.comment}
-                                            </p>
-                                        </div>
-                                    ))}
+                                        ))}
                                 </div>
 
                                 <form
                                     className="review-form"
                                     onSubmit={handleAddReview}
                                 >
-                                    <h3 className="reviews-title">Add a Review</h3>
+                                    <h3 className="reviews-title">
+                                        Add a Review
+                                    </h3>
 
                                     <div className="form-group inline">
                                         <div>
@@ -1503,13 +1557,25 @@ function App() {
                                             <select
                                                 name="rating"
                                                 value={reviewForm.rating}
-                                                onChange={handleReviewInputChange}
+                                                onChange={
+                                                    handleReviewInputChange
+                                                }
                                             >
-                                                <option value="5">5 - Amazing</option>
-                                                <option value="4">4 - Good</option>
-                                                <option value="3">3 - Okay</option>
-                                                <option value="2">2 - Sketchy</option>
-                                                <option value="1">1 - Avoid</option>
+                                                <option value="5">
+                                                    5 - Amazing
+                                                </option>
+                                                <option value="4">
+                                                    4 - Good
+                                                </option>
+                                                <option value="3">
+                                                    3 - Okay
+                                                </option>
+                                                <option value="2">
+                                                    2 - Sketchy
+                                                </option>
+                                                <option value="1">
+                                                    1 - Avoid
+                                                </option>
                                             </select>
                                         </div>
                                         <div>
@@ -1518,7 +1584,9 @@ function App() {
                                                 type="text"
                                                 name="nickname"
                                                 value={reviewForm.nickname}
-                                                onChange={handleReviewInputChange}
+                                                onChange={
+                                                    handleReviewInputChange
+                                                }
                                                 placeholder="Trail name / alias"
                                             />
                                         </div>
@@ -1536,7 +1604,9 @@ function App() {
                                     </div>
 
                                     {reviewError && (
-                                        <p className="error-text">{reviewError}</p>
+                                        <p className="error-text">
+                                            {reviewError}
+                                        </p>
                                     )}
 
                                     <div className="form-actions">
@@ -1545,7 +1615,9 @@ function App() {
                                             className="btn-primary"
                                             disabled={savingReview}
                                         >
-                                            {savingReview ? "Sending…" : "Post Review"}
+                                            {savingReview
+                                                ? "Sending…"
+                                                : "Post Review"}
                                         </button>
                                     </div>
                                 </form>
@@ -1575,10 +1647,9 @@ function App() {
                                         <strong>{session.user.email}</strong>.
                                     </p>
                                     <p className="small-text">
-                                        Right now login is optional – spots and reviews
-                                        still work without an account. We use your
-                                        account to tie new spots (and uploaded photos) to
-                                        you, and to enable editing your own spots.
+                                        Login is optional – spots and reviews still
+                                        work without an account. We use your account
+                                        so you can edit your own spots later.
                                     </p>
                                     <div className="form-actions">
                                         <button
@@ -1604,7 +1675,9 @@ function App() {
                                         />
                                     </div>
                                     {authError && (
-                                        <p className="error-text">{authError}</p>
+                                        <p className="error-text">
+                                            {authError}
+                                        </p>
                                     )}
                                     <div className="form-actions">
                                         <button
@@ -1678,6 +1751,28 @@ function App() {
                         </div>
                     </aside>
                 </div>
+
+                {/* Mobile drawer backdrop (only visible on mobile via CSS) */}
+                {isSheetOpen && (
+                    <button
+                        type="button"
+                        className="mobile-sheet-backdrop"
+                        onClick={() => setIsSheetOpen(false)}
+                        aria-label="Close spots panel"
+                    />
+                )}
+
+                {/* Mobile drawer toggle pill (visible only on mobile via CSS) */}
+                <button
+                    type="button"
+                    className="mobile-spots-toggle"
+                    onClick={() => setIsSheetOpen((open) => !open)}
+                >
+                    {isSheetOpen ? "Hide spots" : "Spots & details"}
+                    <span aria-hidden="true">
+                        {isSheetOpen ? "▾" : "▴"}
+                    </span>
+                </button>
 
                 {/* Full-screen photo viewer */}
                 {activePhoto && (
