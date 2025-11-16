@@ -23,6 +23,54 @@ L.Icon.Default.mergeOptions({
     shadowUrl: markerShadow,
 });
 
+// Shared spot-type configuration (used by filters + form)
+const SPOT_TYPE_OPTIONS = [
+    {
+        value: "forest_road",
+        label: "Free camping / public land",
+    },
+    {
+        value: "campground",
+        label: "Campground / RV park",
+    },
+    {
+        value: "walmart",
+        label: "Store / plaza parking",
+    },
+    {
+        value: "rest_area",
+        label: "Highway rest area",
+    },
+    {
+        value: "city_stealth",
+        label: "City street / stealth",
+    },
+    {
+        value: "truck_stop",
+        label: "Truck stop / travel plaza",
+    },
+    {
+        value: "scenic_view",
+        label: "Scenic viewpoint / overlook",
+    },
+    {
+        value: "water_source",
+        label: "Water fill / spigot",
+    },
+    {
+        value: "shower",
+        label: "Showers / gym / truck stop",
+    },
+    {
+        value: "laundromat",
+        label: "Laundry / laundromat",
+    },
+    {
+        value: "other",
+        label: "Other / something else",
+    },
+];
+
 function AddSpotOnClick({ active, onMapClick }) {
     useMapEvents({
         click(e) {
@@ -68,6 +116,9 @@ function getSpotTypeIcon(type) {
     if (t === "campground") return "🏕️";
     if (t === "scenic_view") return "🌄";
     if (t === "truck_stop") return "⛽";
+    if (t === "water_source") return "🚰";
+    if (t === "shower") return "🚿";
+    if (t === "laundromat") return "🧺";
     return "📍";
 }
 
@@ -134,9 +185,14 @@ function App() {
     const [activePhoto, setActivePhoto] = useState(null);
     const [userLocation, setUserLocation] = useState(null);
 
-    const [filterType, setFilterType] = useState("any");
+    // map style: "standard" | "satellite"
+    const [mapStyle, setMapStyle] = useState("standard");
+
+    // Filters
     const [filterOvernightOnly, setFilterOvernightOnly] = useState(false);
     const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
+    // multi-select type filters
+    const [activeTypes, setActiveTypes] = useState([]); // array of spot_type values
 
     // Auth
     const [currentUser, setCurrentUser] = useState(null);
@@ -277,9 +333,12 @@ function App() {
     const filteredSpots = useMemo(() => {
         let list = spots;
 
-        if (filterType !== "any") {
-            list = list.filter(
-                (s) => (s.spot_type || "other").toLowerCase() === filterType
+        if (activeTypes.length > 0) {
+            const typeSet = new Set(
+                activeTypes.map((t) => t.toLowerCase())
+            );
+            list = list.filter((s) =>
+                typeSet.has((s.spot_type || "other").toLowerCase())
             );
         }
 
@@ -292,7 +351,13 @@ function App() {
         }
 
         return list;
-    }, [spots, filterType, filterOvernightOnly, filterFavoritesOnly, favoriteIds]);
+    }, [
+        spots,
+        activeTypes,
+        filterOvernightOnly,
+        filterFavoritesOnly,
+        favoriteIds,
+    ]);
 
     // For the side "Spots nearby" list
     const spotsForList = useMemo(() => {
@@ -680,6 +745,19 @@ function App() {
 
     const appClassName = darkMode ? "app glass dark" : "app glass";
 
+    // tile layer config based on mapStyle
+    const tileLayerConfig =
+        mapStyle === "satellite"
+            ? {
+                url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attribution:
+                    "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+            }
+            : {
+                url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                attribution: "&copy; OpenStreetMap contributors",
+            };
+
     return (
         <div className={appClassName}>
             <header className="app-header">
@@ -702,6 +780,19 @@ function App() {
                             onClick={handleLocateMe}
                         >
                             📍 My location
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() =>
+                                setMapStyle((prev) =>
+                                    prev === "standard" ? "satellite" : "standard"
+                                )
+                            }
+                        >
+                            {mapStyle === "standard"
+                                ? "🛰 Satellite"
+                                : "🗺 Map view"}
                         </button>
                         <button
                             type="button"
@@ -735,54 +826,67 @@ function App() {
                 {/* Filters */}
                 <div className="filters-row">
                     <div className="filters-group">
-                        <label className="filters-label">Type</label>
-                        <select
-                            value={filterType}
-                            onChange={(e) => setFilterType(e.target.value)}
-                            className="filters-select"
-                        >
-                            <option value="any">Any</option>
-                            <option value="forest_road">
-                                Forest road / public land
-                            </option>
-                            <option value="campground">
-                                Campground / RV park
-                            </option>
-                            <option value="walmart">Store / plaza parking</option>
-                            <option value="rest_area">Highway rest area</option>
-                            <option value="city_stealth">
-                                City street / stealth
-                            </option>
-                            <option value="truck_stop">
-                                Truck stop / travel plaza
-                            </option>
-                            <option value="scenic_view">
-                                Scenic viewpoint / overlook
-                            </option>
-                        </select>
+                        <label className="filters-label">Types</label>
+                        <div className="filters-chips">
+                            <button
+                                type="button"
+                                className={`filter-chip ${activeTypes.length === 0
+                                        ? "filter-chip--active"
+                                        : ""
+                                    }`}
+                                onClick={() => setActiveTypes([])}
+                            >
+                                All
+                            </button>
+                            {SPOT_TYPE_OPTIONS.map((opt) => (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    className={`filter-chip ${activeTypes.includes(opt.value)
+                                            ? "filter-chip--active"
+                                            : ""
+                                        }`}
+                                    onClick={() =>
+                                        setActiveTypes((prev) =>
+                                            prev.includes(opt.value)
+                                                ? prev.filter(
+                                                    (v) => v !== opt.value
+                                                )
+                                                : [...prev, opt.value]
+                                        )
+                                    }
+                                >
+                                    {getSpotTypeIcon(opt.value)} {opt.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
-                    <label className="filters-toggle">
-                        <input
-                            type="checkbox"
-                            checked={filterOvernightOnly}
-                            onChange={(e) =>
-                                setFilterOvernightOnly(e.target.checked)
-                            }
-                        />
-                        <span>Overnight only</span>
-                    </label>
+                    <div className="filters-right">
+                        <label className="filters-toggle">
+                            <input
+                                type="checkbox"
+                                checked={filterOvernightOnly}
+                                onChange={(e) =>
+                                    setFilterOvernightOnly(e.target.checked)
+                                }
+                            />
+                            <span>Overnight only</span>
+                        </label>
 
-                    <button
-                        type="button"
-                        className={`filter-chip ${filterFavoritesOnly ? "filter-chip--active" : ""
-                            }`}
-                        onClick={() =>
-                            setFilterFavoritesOnly((prev) => !prev)
-                        }
-                    >
-                        ⭐ Favorites
-                    </button>
+                        <button
+                            type="button"
+                            className={`filter-chip ${filterFavoritesOnly
+                                    ? "filter-chip--active"
+                                    : ""
+                                }`}
+                            onClick={() =>
+                                setFilterFavoritesOnly((prev) => !prev)
+                            }
+                        >
+                            ⭐ Favorites
+                        </button>
+                    </div>
                 </div>
 
                 {loading && <p className="small-text">Loading spots…</p>}
@@ -799,8 +903,8 @@ function App() {
                             ref={mapRef}
                         >
                             <TileLayer
-                                attribution="&copy; OpenStreetMap contributors"
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                attribution={tileLayerConfig.attribution}
+                                url={tileLayerConfig.url}
                             />
 
                             <AddSpotOnClick
@@ -818,7 +922,8 @@ function App() {
                                 >
                                     <Popup>
                                         <strong>
-                                            {getSpotTypeIcon(spot.spot_type)} {spot.name}
+                                            {getSpotTypeIcon(spot.spot_type)}{" "}
+                                            {spot.name}
                                         </strong>
                                         <br />
                                         {spot.description}
@@ -851,13 +956,18 @@ function App() {
                                                     : "No / nearby / ?"}
                                             </div>
                                             <div>
-                                                Cell: {spot.cell_signal ?? 0} / 5 bars
+                                                Cell:{" "}
+                                                {spot.cell_signal ?? 0} / 5 bars
                                             </div>
                                             <div>
-                                                Noise: {formatNoiseLevel(spot.noise_level)}
+                                                Noise:{" "}
+                                                {formatNoiseLevel(
+                                                    spot.noise_level
+                                                )}
                                             </div>
                                             <div>
-                                                Safety: {spot.safety_rating ?? 0} / 5
+                                                Safety:{" "}
+                                                {spot.safety_rating ?? 0} / 5
                                             </div>
                                         </div>
                                     </Popup>
@@ -881,7 +991,10 @@ function App() {
 
                             {userLocation && (
                                 <Marker
-                                    position={[userLocation.lat, userLocation.lng]}
+                                    position={[
+                                        userLocation.lat,
+                                        userLocation.lng,
+                                    ]}
                                 >
                                     <Popup>You are here</Popup>
                                 </Marker>
@@ -942,9 +1055,16 @@ function App() {
                                                 </span>
                                                 {spot.avgRating != null && (
                                                     <span className="spot-list-item-rating">
-                                                        ★ {spot.avgRating.toFixed(1)}{" "}
+                                                        ★{" "}
+                                                        {spot.avgRating.toFixed(
+                                                            1
+                                                        )}{" "}
                                                         <span className="spot-list-item-rating-count">
-                                                            ({spot.reviewCount})
+                                                            (
+                                                            {
+                                                                spot.reviewCount
+                                                            }
+                                                            )
                                                         </span>
                                                     </span>
                                                 )}
@@ -955,9 +1075,12 @@ function App() {
                                                 <span>
                                                     {spot.distanceKm < 1
                                                         ? `${Math.round(
-                                                            spot.distanceKm * 1000
+                                                            spot.distanceKm *
+                                                            1000
                                                         )} m`
-                                                        : `${spot.distanceKm.toFixed(1)} km`}
+                                                        : `${spot.distanceKm.toFixed(
+                                                            1
+                                                        )} km`}
                                                 </span>
                                             ) : (
                                                 <span className="spot-list-item-distance--muted">
@@ -1036,30 +1159,16 @@ function App() {
                                                 value={spotForm.spotType}
                                                 onChange={handleSpotInputChange}
                                             >
-                                                <option value="forest_road">
-                                                    Forest road / public land
-                                                </option>
-                                                <option value="campground">
-                                                    Campground / RV park
-                                                </option>
-                                                <option value="walmart">
-                                                    Store or plaza parking
-                                                </option>
-                                                <option value="rest_area">
-                                                    Highway rest area
-                                                </option>
-                                                <option value="city_stealth">
-                                                    City street (stealth)
-                                                </option>
-                                                <option value="truck_stop">
-                                                    Truck stop / travel plaza
-                                                </option>
-                                                <option value="scenic_view">
-                                                    Scenic viewpoint / overlook
-                                                </option>
-                                                <option value="other">
-                                                    Other / something else
-                                                </option>
+                                                {SPOT_TYPE_OPTIONS.map(
+                                                    (opt) => (
+                                                        <option
+                                                            key={opt.value}
+                                                            value={opt.value}
+                                                        >
+                                                            {opt.label}
+                                                        </option>
+                                                    )
+                                                )}
                                             </select>
                                         </div>
 
@@ -1067,11 +1176,15 @@ function App() {
                                             <label>
                                                 <input
                                                     type="checkbox"
-                                                    checked={spotForm.overnightAllowed}
+                                                    checked={
+                                                        spotForm.overnightAllowed
+                                                    }
                                                     onChange={(e) =>
                                                         setSpotForm((prev) => ({
                                                             ...prev,
-                                                            overnightAllowed: e.target.checked,
+                                                            overnightAllowed:
+                                                                e.target
+                                                                    .checked,
                                                         }))
                                                     }
                                                 />{" "}
@@ -1087,7 +1200,9 @@ function App() {
                                                     onChange={(e) =>
                                                         setSpotForm((prev) => ({
                                                             ...prev,
-                                                            hasBathroom: e.target.checked,
+                                                            hasBathroom:
+                                                                e.target
+                                                                    .checked,
                                                         }))
                                                     }
                                                 />{" "}
@@ -1101,13 +1216,16 @@ function App() {
                                                 <select
                                                     name="cellSignal"
                                                     value={spotForm.cellSignal}
-                                                    onChange={handleSpotInputChange}
+                                                    onChange={
+                                                        handleSpotInputChange
+                                                    }
                                                 >
                                                     <option value="0">
                                                         0 – no service at all
                                                     </option>
                                                     <option value="1">
-                                                        1 – one bar / mostly useless
+                                                        1 – one bar / mostly
+                                                        useless
                                                     </option>
                                                     <option value="2">
                                                         2 – spotty but can text
@@ -1127,26 +1245,36 @@ function App() {
                                                 <label>Safety rating</label>
                                                 <select
                                                     name="safetyRating"
-                                                    value={spotForm.safetyRating}
-                                                    onChange={handleSpotInputChange}
+                                                    value={
+                                                        spotForm.safetyRating
+                                                    }
+                                                    onChange={
+                                                        handleSpotInputChange
+                                                    }
                                                 >
                                                     <option value="0">
-                                                        0 – would rather sleep at my in-laws
+                                                        0 – would rather sleep
+                                                        at my in-laws
                                                     </option>
                                                     <option value="1">
-                                                        1 – only if absolutely desperate
+                                                        1 – only if absolutely
+                                                        desperate
                                                     </option>
                                                     <option value="2">
-                                                        2 – kinda sketchy but survivable
+                                                        2 – kinda sketchy but
+                                                        survivable
                                                     </option>
                                                     <option value="3">
-                                                        3 – fine with some awareness
+                                                        3 – fine with some
+                                                        awareness
                                                     </option>
                                                     <option value="4">
-                                                        4 – feels pretty safe overall
+                                                        4 – feels pretty safe
+                                                        overall
                                                     </option>
                                                     <option value="5">
-                                                        5 – would recommend to a friend
+                                                        5 – would recommend to a
+                                                        friend
                                                     </option>
                                                 </select>
                                             </div>
@@ -1169,19 +1297,23 @@ function App() {
                                                     Some road noise
                                                 </option>
                                                 <option value="steady_noise">
-                                                    Loud but steady (trucks, generators)
+                                                    Loud but steady (trucks,
+                                                    generators)
                                                 </option>
                                                 <option value="party">
                                                     Party / unpredictable
                                                 </option>
                                                 <option value="unknown">
-                                                    Not sure / didn&apos;t notice
+                                                    Not sure / didn&apos;t
+                                                    notice
                                                 </option>
                                             </select>
                                         </div>
 
                                         <div className="form-group">
-                                            <label>Photo URLs (comma-separated)</label>
+                                            <label>
+                                                Photo URLs (comma-separated)
+                                            </label>
                                             <input
                                                 type="text"
                                                 name="photoUrls"
@@ -1190,15 +1322,14 @@ function App() {
                                                 placeholder="https://..., https://..."
                                             />
                                             <p className="tiny-text">
-                                                You can paste image URLs here. These will be
-                                                stored alongside any uploaded photos.
+                                                You can paste image URLs here.
+                                                These will be stored alongside
+                                                any uploaded photos.
                                             </p>
                                         </div>
 
                                         <div className="form-group">
-                                            <label>
-                                                Upload photos (optional)
-                                            </label>
+                                            <label>Upload photos (optional)</label>
                                             <input
                                                 ref={fileInputRef}
                                                 type="file"
@@ -1207,14 +1338,17 @@ function App() {
                                                 onChange={handlePhotoFileChange}
                                             />
                                             <p className="tiny-text">
-                                                Select 1–4 photos from your device. They’ll
-                                                be uploaded to Supabase storage and linked to
+                                                Select 1–4 photos from your
+                                                device. They’ll be uploaded to
+                                                Supabase storage and linked to
                                                 this spot.
                                             </p>
                                         </div>
 
                                         {errorMsg && (
-                                            <p className="error-text">{errorMsg}</p>
+                                            <p className="error-text">
+                                                {errorMsg}
+                                            </p>
                                         )}
 
                                         <div className="form-actions">
@@ -1222,14 +1356,20 @@ function App() {
                                                 type="button"
                                                 className="btn-secondary"
                                                 onClick={cancelAdding}
-                                                disabled={savingSpot || uploadingPhotos}
+                                                disabled={
+                                                    savingSpot ||
+                                                    uploadingPhotos
+                                                }
                                             >
                                                 Cancel
                                             </button>
                                             <button
                                                 type="submit"
                                                 className="btn-primary"
-                                                disabled={savingSpot || uploadingPhotos}
+                                                disabled={
+                                                    savingSpot ||
+                                                    uploadingPhotos
+                                                }
                                             >
                                                 {savingSpot || uploadingPhotos
                                                     ? editMode
@@ -1251,7 +1391,9 @@ function App() {
                                 <div className="sheet-title-row">
                                     <div className="sheet-title-main">
                                         <h2 className="sheet-title">
-                                            {getSpotTypeIcon(selectedSpot.spot_type)}{" "}
+                                            {getSpotTypeIcon(
+                                                selectedSpot.spot_type
+                                            )}{" "}
                                             {selectedSpot.name}
                                         </h2>
                                         <button
@@ -1295,9 +1437,12 @@ function App() {
                                             : "No reviews yet"}
                                     </span>
                                     <span>
-                                        Cell: {selectedSpot.cell_signal ?? 0}/5 · Safety:{" "}
-                                        {selectedSpot.safety_rating ?? 0}/5 · Noise:{" "}
-                                        {formatNoiseLevel(selectedSpot.noise_level)}
+                                        Cell: {selectedSpot.cell_signal ?? 0}/5 ·
+                                        Safety: {selectedSpot.safety_rating ?? 0}
+                                        /5 · Noise:{" "}
+                                        {formatNoiseLevel(
+                                            selectedSpot.noise_level
+                                        )}
                                     </span>
                                 </div>
 
@@ -1328,14 +1473,18 @@ function App() {
                                     <button
                                         type="button"
                                         className="btn-secondary"
-                                        onClick={() => openSpotInMaps(selectedSpot)}
+                                        onClick={() =>
+                                            openSpotInMaps(selectedSpot)
+                                        }
                                     >
                                         Open in Maps
                                     </button>
                                     <button
                                         type="button"
                                         className="btn-secondary"
-                                        onClick={() => startEditingSpot(selectedSpot)}
+                                        onClick={() =>
+                                            startEditingSpot(selectedSpot)
+                                        }
                                     >
                                         Edit spot
                                     </button>
@@ -1349,35 +1498,44 @@ function App() {
                                         </p>
                                     )}
 
-                                    {selectedSpotReviews.slice(0, 6).map((rev) => (
-                                        <div key={rev.id} className="review-card">
-                                            <div className="review-header">
-                                                <span className="review-rating">
-                                                    {"⭐".repeat(rev.rating || 0)}
-                                                </span>
-                                                <span className="review-name">
-                                                    {rev.nickname || "Anon"}
-                                                </span>
-                                                <span className="review-date">
-                                                    {rev.created_at
-                                                        ? new Date(
-                                                            rev.created_at
-                                                        ).toLocaleDateString()
-                                                        : ""}
-                                                </span>
+                                    {selectedSpotReviews
+                                        .slice(0, 6)
+                                        .map((rev) => (
+                                            <div
+                                                key={rev.id}
+                                                className="review-card"
+                                            >
+                                                <div className="review-header">
+                                                    <span className="review-rating">
+                                                        {"⭐".repeat(
+                                                            rev.rating || 0
+                                                        )}
+                                                    </span>
+                                                    <span className="review-name">
+                                                        {rev.nickname || "Anon"}
+                                                    </span>
+                                                    <span className="review-date">
+                                                        {rev.created_at
+                                                            ? new Date(
+                                                                rev.created_at
+                                                            ).toLocaleDateString()
+                                                            : ""}
+                                                    </span>
+                                                </div>
+                                                <p className="review-comment">
+                                                    {rev.comment}
+                                                </p>
                                             </div>
-                                            <p className="review-comment">
-                                                {rev.comment}
-                                            </p>
-                                        </div>
-                                    ))}
+                                        ))}
                                 </div>
 
                                 <form
                                     className="review-form"
                                     onSubmit={handleAddReview}
                                 >
-                                    <h3 className="reviews-title">Add a Review</h3>
+                                    <h3 className="reviews-title">
+                                        Add a Review
+                                    </h3>
 
                                     <div className="form-group inline">
                                         <div>
@@ -1385,22 +1543,34 @@ function App() {
                                             <select
                                                 name="rating"
                                                 value={reviewForm.rating}
-                                                onChange={handleReviewInputChange}
+                                                onChange={
+                                                    handleReviewInputChange
+                                                }
                                             >
-                                                <option value="5">5 - Amazing</option>
+                                                <option value="5">
+                                                    5 - Amazing
+                                                </option>
                                                 <option value="4">4 - Good</option>
                                                 <option value="3">3 - Okay</option>
-                                                <option value="2">2 - Sketchy</option>
-                                                <option value="1">1 - Avoid</option>
+                                                <option value="2">
+                                                    2 - Sketchy
+                                                </option>
+                                                <option value="1">
+                                                    1 - Avoid
+                                                </option>
                                             </select>
                                         </div>
                                         <div>
-                                            <label>Nickname (optional)</label>
+                                            <label>
+                                                Nickname (optional)
+                                            </label>
                                             <input
                                                 type="text"
                                                 name="nickname"
                                                 value={reviewForm.nickname}
-                                                onChange={handleReviewInputChange}
+                                                onChange={
+                                                    handleReviewInputChange
+                                                }
                                                 placeholder="Trail name / alias"
                                             />
                                         </div>
@@ -1411,14 +1581,18 @@ function App() {
                                         <textarea
                                             name="comment"
                                             value={reviewForm.comment}
-                                            onChange={handleReviewInputChange}
+                                            onChange={
+                                                handleReviewInputChange
+                                            }
                                             placeholder="How was this spot? Safe? Noisy? Clean?"
                                             rows={3}
                                         />
                                     </div>
 
                                     {reviewError && (
-                                        <p className="error-text">{reviewError}</p>
+                                        <p className="error-text">
+                                            {reviewError}
+                                        </p>
                                     )}
 
                                     <div className="form-actions">
@@ -1427,7 +1601,9 @@ function App() {
                                             className="btn-primary"
                                             disabled={savingReview}
                                         >
-                                            {savingReview ? "Sending…" : "Post Review"}
+                                            {savingReview
+                                                ? "Sending…"
+                                                : "Post Review"}
                                         </button>
                                     </div>
                                 </form>
@@ -1437,11 +1613,13 @@ function App() {
                         {/* Helpful prompt when nothing is selected */}
                         {!adding && !selectedSpot && (
                             <div className="sheet-section">
-                                <h2 className="sheet-title">Explore the map</h2>
+                                <h2 className="sheet-title">
+                                    Explore the map
+                                </h2>
                                 <p className="small-text">
-                                    Tap a pin to see details &amp; reviews, or tap{" "}
-                                    <strong>Add Spot</strong> to share a safe place
-                                    you&apos;ve stayed.
+                                    Tap a pin to see details &amp; reviews, or
+                                    tap <strong>Add Spot</strong> to share a
+                                    safe place you&apos;ve stayed.
                                 </p>
                             </div>
                         )}
@@ -1461,9 +1639,9 @@ function App() {
                             </p>
                             {currentUser && (
                                 <p className="small-text">
-                                    Right now login is optional – later we can use
-                                    this to manage your spots, edit them, and sync
-                                    favorites.
+                                    Right now login is optional – later we can
+                                    use this to manage your spots, edit them,
+                                    and sync favorites.
                                 </p>
                             )}
                             <div className="spot-actions">
@@ -1474,7 +1652,9 @@ function App() {
                                         onClick={handleSignOut}
                                         disabled={authBusy}
                                     >
-                                        {authBusy ? "Signing out…" : "Sign out"}
+                                        {authBusy
+                                            ? "Signing out…"
+                                            : "Sign out"}
                                     </button>
                                 ) : (
                                     <button
@@ -1483,7 +1663,9 @@ function App() {
                                         onClick={handleSignIn}
                                         disabled={authBusy}
                                     >
-                                        {authBusy ? "Sending link…" : "Sign in"}
+                                        {authBusy
+                                            ? "Sending link…"
+                                            : "Sign in"}
                                     </button>
                                 )}
                             </div>
@@ -1495,9 +1677,9 @@ function App() {
                             <p className="small-text">
                                 Nomad Safe Spots is a free, community-driven map
                                 built by{" "}
-                                <span className="brand-name">Statusnone</span> to
-                                help vanlifers and nomads find safe places to park,
-                                rest, and reset.
+                                <span className="brand-name">Statusnone</span>{" "}
+                                to help vanlifers and nomads find safe places to
+                                park, rest, and reset.
                             </p>
 
                             <div className="social-links">
