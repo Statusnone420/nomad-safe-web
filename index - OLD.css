@@ -44,13 +44,13 @@ body {
     z-index: 10;
     padding: 0.9rem 1rem 0.8rem;
     border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-    background: radial-gradient( circle at top left, rgba(15, 23, 42, 0.96) 0, rgba(15, 23, 42, 0.94) 40%, rgba(15, 23, 42, 0.92) 100% );
+    background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.96) 0, rgba(15, 23, 42, 0.94) 40%, rgba(15, 23, 42, 0.92) 100%);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
 }
 
 .app:not(.dark) .app-header {
-    background: radial-gradient( circle at top left, rgba(248, 250, 252, 0.95) 0, rgba(241, 245, 249, 0.9) 40%, rgba(226, 232, 240, 0.9) 100% );
+    background: radial-gradient(circle at top left, rgba(248, 250, 252, 0.95) 0, rgba(241, 245, 249, 0.9) 40%, rgba(226, 232, 240, 0.9) 100%);
 }
 
 .brand-row {
@@ -207,7 +207,7 @@ body {
     }
 
 .filter-chip--active {
-    background: radial-gradient( circle at top left, rgba(0, 200, 255, 0.35), rgba(0, 0, 0, 0.9) );
+    background: radial-gradient(circle at top left, rgba(0, 200, 255, 0.35), rgba(0, 0, 0, 0.9));
     border-color: rgba(0, 200, 255, 0.9);
     color: #e7fbff;
     transform: translateY(-1px);
@@ -259,7 +259,7 @@ body {
     gap: 0.6rem;
 }
 
-/* ==== BOTTOM SHEET / SIDEBAR ==== */
+/* ==== BOTTOM SHEET (MOBILE) / SIDEBAR (DESKTOP) ==== */
 
 .sheet {
     flex: 1;
@@ -271,7 +271,7 @@ body {
 .sheet-section {
     padding: 0.8rem 0.9rem;
     border-radius: 1.1rem;
-    background: radial-gradient( circle at top left, rgba(15, 23, 42, 0.97) 0, rgba(15, 23, 42, 0.95) 30%, rgba(15, 23, 42, 0.94) 100% );
+    background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.97) 0, rgba(15, 23, 42, 0.95) 30%, rgba(15, 23, 42, 0.94) 100%);
     border: 1px solid rgba(55, 65, 81, 0.9);
     box-shadow: 0 18px 55px rgba(0, 0, 0, 1);
     backdrop-filter: blur(20px);
@@ -279,7 +279,7 @@ body {
 }
 
 .app:not(.dark) .sheet-section {
-    background: radial-gradient( circle at top left, rgba(255, 255, 255, 0.98) 0, rgba(248, 250, 252, 0.96) 35%, rgba(241, 245, 249, 0.94) 100% );
+    background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.98) 0, rgba(248, 250, 252, 0.96) 35%, rgba(241, 245, 249, 0.94) 100%);
     border-color: rgba(148, 163, 184, 0.7);
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
 }
@@ -300,12 +300,6 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
-}
-
-.sheet-title-main {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
 }
 
 .sheet-title {
@@ -359,29 +353,10 @@ body {
     text-shadow: 0 0 6px rgba(255, 215, 0, 0.9), 0 0 14px rgba(255, 215, 0, 0.6);
 }
 
-/* Close button */
-
-.sheet-close {
-    border: none;
-    background: transparent;
-    color: rgba(148, 163, 184, 0.9);
-    font-size: 1rem;
-    cursor: pointer;
-    padding: 0.15rem 0.35rem;
-    border-radius: 999px;
-    transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease;
-}
-
-    .sheet-close:hover {
-        background: rgba(15, 23, 42, 0.9);
-        color: #e5e7eb;
-        transform: translateY(-1px);
-    }
-
 /* ==== SPOT LIST PANEL ==== */
 
 .spot-list-panel {
-    background: radial-gradient( circle at top, rgba(18, 18, 18, 0.96), rgba(5, 5, 5, 0.98) );
+    background: radial-gradient(circle at top, rgba(18, 18, 18, 0.96), rgba(5, 5, 5, 0.98));
     border-radius: 1rem;
     border: 1px solid rgba(255, 255, 255, 0.04);
     padding: 0.65rem 0.7rem 0.6rem;
@@ -442,14 +417,14 @@ body {
     }
 
     .spot-list-item:hover {
-        background: radial-gradient( circle at top left, rgba(0, 200, 255, 0.18), rgba(5, 5, 5, 0.98) );
+        background: radial-gradient(circle at top left, rgba(0, 200, 255, 0.18), rgba(5, 5, 5, 0.98));
         transform: translateY(-1px);
         box-shadow: 0 10px 20px rgba(0, 0, 0, 0.8);
         border-color: rgba(0, 200, 255, 0.55);
     }
 
 .spot-list-item--active {
-    background: radial-gradient( circle at top left, rgba(0, 200, 255, 0.26), rgba(0, 0, 0, 0.98) );
+    background: radial-gradient(circle at top left, rgba(0, 200, 255, 0.26), rgba(0, 0, 0, 0.98));
     border-color: rgba(0, 200, 255, 0.9);
 }
 
@@ -532,17 +507,10 @@ body {
     gap: 0.25rem;
 }
 
-    /* inline group for two side-by-side fields */
     .form-group.inline {
-        display: flex;
         flex-direction: row;
         gap: 0.75rem;
     }
-
-        .form-group.inline > div {
-            flex: 1 1 0;
-            min-width: 0;
-        }
 
     .form-group label {
         font-size: 0.8rem;
@@ -560,12 +528,8 @@ body {
         color: #e5e7eb;
     }
 
-.app:not(.dark)
-.form-group
-input[type="text"],
-.app:not(.dark)
-.form-group
-input[type="number"],
+.app:not(.dark) .form-group input[type="text"],
+.app:not(.dark) .form-group input[type="number"],
 .app:not(.dark) .form-group textarea,
 .app:not(.dark) .form-group select {
     background: rgba(255, 255, 255, 0.98);
@@ -599,7 +563,7 @@ input[type="number"],
 
 /* main accent: neon blue/purple */
 .btn-primary {
-    background: radial-gradient( circle at 20% 0, #4f46e5 0, #6366f1 30%, #22d3ee 90% );
+    background: radial-gradient(circle at 20% 0, #4f46e5 0, #6366f1 30%, #22d3ee 90%);
     color: #ffffff;
     box-shadow: 0 10px 28px rgba(37, 99, 235, 0.7);
 }
@@ -784,7 +748,7 @@ input[type="number"],
     border-color: #6366f1;
 }
 
-/* ==== MOBILE OVERRIDES ==== */
+/* ==== MOBILE OVERRIDES (APP-LIKE, BUT USABLE) ==== */
 
 @media (max-width: 768px) {
     .main-content {
@@ -810,13 +774,13 @@ input[type="number"],
     }
 
     .sheet {
-        position: relative;
+        position: relative; /* no overlay on map */
         left: auto;
         right: auto;
         bottom: auto;
         max-width: 100%;
         padding: 0 0.55rem 0.6rem;
-        pointer-events: auto;
+        pointer-events: auto; /* everything behaves normally */
     }
 
     .sheet-section {
@@ -841,17 +805,4 @@ input[type="number"],
     .spot-list-body {
         padding-bottom: 0.15rem;
     }
-}
-
-/* Extra small screens: stack inline fields so they don't overflow */
-
-@media (max-width: 540px) {
-    .form-group.inline {
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-
-        .form-group.inline > div {
-            width: 100%;
-        }
 }
