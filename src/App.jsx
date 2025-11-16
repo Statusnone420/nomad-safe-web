@@ -115,30 +115,35 @@ const initialReviewForm = {
 };
 
 function App() {
+    // ---- core data ----
     const [spots, setSpots] = useState([]);
     const [reviews, setReviews] = useState([]);
+
+    // ---- add spot / reviews ----
     const [adding, setAdding] = useState(false);
     const [pendingLocation, setPendingLocation] = useState(null);
     const [spotForm, setSpotForm] = useState(initialSpotForm);
     const [reviewForm, setReviewForm] = useState(initialReviewForm);
     const [selectedSpotId, setSelectedSpotId] = useState(null);
+
+    // ---- loading / status ----
     const [loading, setLoading] = useState(true);
     const [savingSpot, setSavingSpot] = useState(false);
     const [savingReview, setSavingReview] = useState(false);
     const [status, setStatus] = useState("Connecting to Supabase…");
     const [errorMsg, setErrorMsg] = useState("");
     const [reviewError, setReviewError] = useState("");
-    const [darkMode, setDarkMode] = useState(true); // default to dark / AMOLED
-    const [activePhoto, setActivePhoto] = useState(null); // full-screen photo viewer
+
+    // ---- theme / photos / location ----
+    const [darkMode, setDarkMode] = useState(true); // AMOLED default
+    const [activePhoto, setActivePhoto] = useState(null);
     const [userLocation, setUserLocation] = useState(null);
 
+    // ---- filters / favorites ----
     const [filterType, setFilterType] = useState("any");
-    const [filterOvernightOnly, setFilterOvernightOnly] =
-        useState(false);
-    const [filterFavoritesOnly, setFilterFavoritesOnly] =
-        useState(false);
+    const [filterOvernightOnly, setFilterOvernightOnly] = useState(false);
+    const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
 
-    // Local favorites (starred spots)
     const [favoriteIds, setFavoriteIds] = useState(() => {
         if (typeof window === "undefined") return new Set();
         try {
@@ -151,13 +156,21 @@ function App() {
         }
     });
 
-    // Supabase auth state
-    const [session, setSession] = useState(null);
-    const [authEmail, setAuthEmail] = useState("");
-    const [authStatus, setAuthStatus] = useState("");
-    const [authError, setAuthError] = useState("");
+    // ---- auth ----
+    const [user, setUser] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
+    const [loginEmail, setLoginEmail] = useState("");
+    const [loginStatus, setLoginStatus] = useState("");
+    const [loginError, setLoginError] = useState("");
 
+    // ---- NEW: local photo upload state ----
+    const [spotPhotoFiles, setSpotPhotoFiles] = useState([]);
+    const [uploadingPhotos, setUploadingPhotos] = useState(false);
+
+    const mapRef = useRef(null);
+    const center = [39.5, -98.35]; // Center of US
+
+    // ---- persist favorites ----
     useEffect(() => {
         try {
             window.localStorage.setItem(
@@ -183,10 +196,7 @@ function App() {
 
     const isFavorite = (spotId) => favoriteIds.has(spotId);
 
-    const mapRef = useRef(null);
-    const center = [39.5, -98.35]; // Center of US
-
-    // Load existing spots + reviews from Supabase on first render
+    // ---- load spots + reviews ----
     useEffect(() => {
         async function loadData() {
             setStatus("Loading spots and reviews from Supabase…");
@@ -226,35 +236,37 @@ function App() {
         loadData();
     }, []);
 
-    // Auth bootstrap + listener
+    // ---- auth: keep user in sync ----
     useEffect(() => {
-        let subscription;
-        async function initAuth() {
-            setAuthLoading(true);
+        let mounted = true;
+
+        async function getInitialSession() {
             const {
                 data: { session },
                 error,
             } = await supabase.auth.getSession();
+
+            if (!mounted) return;
+
             if (error) {
                 console.error("Error getting auth session:", error);
             }
-            setSession(session ?? null);
+            setUser(session?.user ?? null);
             setAuthLoading(false);
-
-            const { data } = supabase.auth.onAuthStateChange(
-                (_event, session) => {
-                    setSession(session ?? null);
-                }
-            );
-            subscription = data.subscription;
         }
 
-        initAuth();
+        getInitialSession();
+
+        const {
+            data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (!mounted) return;
+            setUser(session?.user ?? null);
+        });
 
         return () => {
-            if (subscription) {
-                subscription.unsubscribe();
-            }
+            mounted = false;
+            subscription.unsubscribe();
         };
     }, []);
 
@@ -300,7 +312,6 @@ function App() {
         return list;
     }, [spots, filterType, filterOvernightOnly, filterFavoritesOnly, favoriteIds]);
 
-    // For the side "Spots nearby" list
     const spotsForList = useMemo(() => {
         return filteredSpots
             .map((spot) => {
@@ -349,11 +360,15 @@ function App() {
             });
     }, [filteredSpots, userLocation, favoriteIds, reviews]);
 
+    // ---- add spot / reviews helpers ----
+
     function startAdding() {
         setAdding(true);
         setPendingLocation(null);
         setSpotForm(initialSpotForm);
         setErrorMsg("");
+        setSpotPhotoFiles([]);
+        setUploadingPhotos(false);
     }
 
     function cancelAdding() {
@@ -361,6 +376,8 @@ function App() {
         setPendingLocation(null);
         setSpotForm(initialSpotForm);
         setErrorMsg("");
+        setSpotPhotoFiles([]);
+        setUploadingPhotos(false);
     }
 
     function handleMapClick(lat, lng) {
@@ -384,6 +401,83 @@ function App() {
             [name]: value,
         }));
     }
+
+    // ---- auth handlers ----
+
+    async function handleLogin(e) {
+        e.preventDefault();
+        setLoginError("");
+        setLoginStatus("");
+
+        if (!loginEmail.trim()) {
+            setLoginError("Enter an email address.");
+            return;
+        }
+
+        setLoginStatus("Sending magic link…");
+
+        const { error } = await supabase.auth.signInWithOtp({
+            email: loginEmail.trim(),
+            options: {
+                emailRedirectTo: window.location.origin,
+            },
+        });
+
+        if (error) {
+            console.error("Error sending magic link:", error);
+            setLoginError(error.message);
+            setLoginStatus("");
+            return;
+        }
+
+        setLoginStatus("Check your email for a login link.");
+    }
+
+    async function handleLogout() {
+        await supabase.auth.signOut();
+        setLoginStatus("");
+        setLoginError("");
+    }
+
+    // ---- NEW: upload photos helper ----
+
+    async function uploadSpotPhotos(files, userId) {
+        if (!files.length) return [];
+
+        setUploadingPhotos(true);
+
+        try {
+            const uploads = await Promise.all(
+                files.map(async (file, index) => {
+                    const ext = file.name.split(".").pop() || "jpg";
+                    const path = `${userId}/${Date.now()}-${index}.${ext}`;
+
+                    const { error: uploadError } = await supabase.storage
+                        .from("spot-photos")
+                        .upload(path, file, {
+                            cacheControl: "3600",
+                            upsert: false,
+                        });
+
+                    if (uploadError) {
+                        throw uploadError;
+                    }
+
+                    const { data } = supabase.storage
+                        .from("spot-photos")
+                        .getPublicUrl(path);
+
+                    return data.publicUrl;
+                })
+            );
+
+            return uploads;
+        } finally {
+            setUploadingPhotos(false);
+        }
+    }
+
+    // ---- save spot (with photo upload) ----
 
     async function handleSaveSpot(e) {
         e.preventDefault();
@@ -424,6 +518,30 @@ function App() {
                 .split(",")
                 .map((u) => u.trim())
                 .filter(Boolean);
+        }
+
+        // If the user picked local files, we try to upload them.
+        if (spotPhotoFiles.length > 0) {
+            if (!user) {
+                setErrorMsg(
+                    "Sign in to upload photos, or remove the selected files to save without photos."
+                );
+                return;
+            }
+
+            try {
+                const uploaded = await uploadSpotPhotos(
+                    spotPhotoFiles,
+                    user.id
+                );
+                photo_urls = [...photo_urls, ...uploaded];
+            } catch (err) {
+                console.error("Photo upload error:", err);
+                setErrorMsg(
+                    "Error uploading photos. Try again, or save the spot without files."
+                );
+                return;
+            }
         }
 
         setSavingSpot(true);
@@ -468,11 +586,7 @@ function App() {
             return;
         }
 
-        const rating = clamp(
-            parseInt(reviewForm.rating, 10) || 0,
-            1,
-            5
-        );
+        const rating = clamp(parseInt(reviewForm.rating, 10) || 0, 1, 5);
         if (!rating) {
             setReviewError("Rating 1–5 is required.");
             return;
@@ -506,55 +620,6 @@ function App() {
 
         setReviews((prev) => [data, ...prev]);
         setReviewForm(initialReviewForm);
-    }
-
-    async function handleSendLoginLink(e) {
-        e.preventDefault();
-        setAuthError("");
-        setAuthStatus("");
-
-        const email = authEmail.trim();
-        if (!email) {
-            setAuthError("Enter your email first.");
-            return;
-        }
-
-        try {
-            const redirectTo =
-                typeof window !== "undefined"
-                    ? window.location.origin
-                    : undefined;
-
-            const { error } = await supabase.auth.signInWithOtp({
-                email,
-                options: {
-                    emailRedirectTo: redirectTo,
-                    shouldCreateUser: true,
-                },
-            });
-
-            if (error) {
-                console.error("Error sending magic link:", error);
-                setAuthError(error.message);
-                return;
-            }
-
-            setAuthStatus("Check your email for a sign-in link.");
-        } catch (err) {
-            console.error(err);
-            setAuthError("Something went wrong sending the link.");
-        }
-    }
-
-    async function handleSignOut() {
-        setAuthError("");
-        setAuthStatus("");
-        const { error } = await supabase.auth.signOut();
-        if (error) {
-            console.error("Error signing out:", error);
-            setAuthError(error.message);
-            return;
-        }
     }
 
     function handleLocateMe() {
@@ -592,11 +657,6 @@ function App() {
 
     const appClassName = darkMode ? "app glass dark" : "app glass";
 
-    const userEmail = session?.user?.email ?? null;
-    const userLabel = userEmail
-        ? userEmail.split("@")[0]
-        : null;
-
     return (
         <div className={appClassName}>
             <header className="app-header">
@@ -608,8 +668,7 @@ function App() {
                             spots – community powered.
                         </p>
                         <p className="brand-by">
-                            Crafted by{" "}
-                            <span className="brand-name">Statusnone</span>
+                            Crafted by <span className="brand-name">Statusnone</span>
                         </p>
                     </div>
                     <div className="header-controls">
@@ -627,22 +686,14 @@ function App() {
                         >
                             {darkMode ? "☀️ Light" : "🌙 Dark"}
                         </button>
-                        <button
-                            type="button"
-                            className="btn-ghost btn-ghost--account"
-                            onClick={() => {
-                                const accountEl =
-                                    document.getElementById("account-card");
-                                if (accountEl) {
-                                    accountEl.scrollIntoView({
-                                        behavior: "smooth",
-                                        block: "start",
-                                    });
-                                }
-                            }}
-                        >
-                            {userLabel ? `👤 ${userLabel}` : "🔐 Sign in"}
-                        </button>
+                        {user && (
+                            <div className="account-pill">
+                                <span className="account-pill-dot" />
+                                <span className="account-pill-email">
+                                    {user.email}
+                                </span>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -673,9 +724,7 @@ function App() {
                             <option value="walmart">
                                 Store / plaza parking
                             </option>
-                            <option value="rest_area">
-                                Highway rest area
-                            </option>
+                            <option value="rest_area">Highway rest area</option>
                             <option value="city_stealth">
                                 City street / stealth
                             </option>
@@ -692,9 +741,7 @@ function App() {
                         <input
                             type="checkbox"
                             checked={filterOvernightOnly}
-                            onChange={(e) =>
-                                setFilterOvernightOnly(e.target.checked)
-                            }
+                            onChange={(e) => setFilterOvernightOnly(e.target.checked)}
                         />
                         <span>Overnight only</span>
                     </label>
@@ -762,15 +809,11 @@ function App() {
                                             </div>
                                             <div>
                                                 Overnight allowed:{" "}
-                                                {spot.overnight_allowed
-                                                    ? "Yes"
-                                                    : "No / unknown"}
+                                                {spot.overnight_allowed ? "Yes" : "No / unknown"}
                                             </div>
                                             <div>
                                                 Bathrooms:{" "}
-                                                {spot.has_bathroom
-                                                    ? "Yes"
-                                                    : "No / nearby / ?"}
+                                                {spot.has_bathroom ? "Yes" : "No / nearby / ?"}
                                             </div>
                                             <div>
                                                 Cell: {spot.cell_signal ?? 0} / 5 bars
@@ -805,7 +848,7 @@ function App() {
                     </div>
                 </div>
 
-                {/* Right-hand column: list + details/reviews */}
+                {/* Right-hand column: list + details/reviews + account */}
                 <div className="side-column">
                     {/* Spot list panel */}
                     <aside className="spot-list-panel">
@@ -1093,6 +1136,7 @@ function App() {
                                             </select>
                                         </div>
 
+                                        {/* Existing URL-based images still allowed */}
                                         <div className="form-group">
                                             <label>Photo URLs (comma-separated)</label>
                                             <input
@@ -1102,9 +1146,36 @@ function App() {
                                                 onChange={handleSpotInputChange}
                                                 placeholder="https://..., https://..."
                                             />
+                                        </div>
+
+                                        {/* NEW: file upload for photos */}
+                                        <div className="form-group">
+                                            <label>
+                                                Upload photos{" "}
+                                                <span className="tiny-text">
+                                                    (requires login)
+                                                </span>
+                                            </label>
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                multiple
+                                                onChange={(e) =>
+                                                    setSpotPhotoFiles(
+                                                        Array.from(e.target.files || [])
+                                                    )
+                                                }
+                                            />
+                                            {spotPhotoFiles.length > 0 && (
+                                                <p className="tiny-text">
+                                                    {spotPhotoFiles.length} file
+                                                    {spotPhotoFiles.length === 1 ? "" : "s"} selected
+                                                    {uploadingPhotos && " · uploading…"}
+                                                </p>
+                                            )}
                                             <p className="tiny-text">
-                                                For now, paste image URLs hosted elsewhere.
-                                                Later we’ll add direct uploads.
+                                                You can mix hosted URLs and uploaded files. Uploaded
+                                                images are stored in Supabase Storage.
                                             </p>
                                         </div>
 
@@ -1117,16 +1188,18 @@ function App() {
                                                 type="button"
                                                 className="btn-secondary"
                                                 onClick={cancelAdding}
-                                                disabled={savingSpot}
+                                                disabled={savingSpot || uploadingPhotos}
                                             >
                                                 Cancel
                                             </button>
                                             <button
                                                 type="submit"
                                                 className="btn-primary"
-                                                disabled={savingSpot}
+                                                disabled={savingSpot || uploadingPhotos}
                                             >
-                                                {savingSpot ? "Saving…" : "Save Spot"}
+                                                {savingSpot || uploadingPhotos
+                                                    ? "Saving…"
+                                                    : "Save Spot"}
                                             </button>
                                         </div>
                                     </form>
@@ -1326,33 +1399,27 @@ function App() {
                             </div>
                         )}
 
-                        {/* ACCOUNT CARD */}
-                        <div className="sheet-section" id="account-card">
+                        {/* Account card */}
+                        <div className="sheet-section">
                             <h2 className="sheet-title">Account</h2>
                             {authLoading ? (
-                                <p className="small-text">Checking your login…</p>
-                            ) : session && userEmail ? (
+                                <p className="small-text">Checking login…</p>
+                            ) : user ? (
                                 <>
                                     <p className="small-text">
-                                        Signed in as <strong>{userEmail}</strong>.
+                                        Signed in as <strong>{user.email}</strong>.
                                     </p>
-                                    <p className="tiny-text">
+                                    <p className="small-text">
                                         Right now login is optional – spots and reviews
                                         still work without an account. Later we can use
                                         this to manage your spots, edit them, and sync
                                         favorites.
                                     </p>
-                                    {authStatus && (
-                                        <p className="auth-status">{authStatus}</p>
-                                    )}
-                                    {authError && (
-                                        <p className="error-text">{authError}</p>
-                                    )}
                                     <div className="form-actions">
                                         <button
                                             type="button"
                                             className="btn-secondary"
-                                            onClick={handleSignOut}
+                                            onClick={handleLogout}
                                         >
                                             Sign out
                                         </button>
@@ -1361,36 +1428,36 @@ function App() {
                             ) : (
                                 <>
                                     <p className="small-text">
-                                        Sign in with a one-time link sent to your email.
-                                        No passwords to remember.
+                                        Login is optional, but required to upload photos
+                                        and (later) manage your own spots.
                                     </p>
                                     <form
                                         className="spot-form"
-                                        onSubmit={handleSendLoginLink}
+                                        onSubmit={handleLogin}
                                     >
                                         <div className="form-group">
                                             <label>Email</label>
                                             <input
                                                 type="text"
-                                                value={authEmail}
+                                                value={loginEmail}
                                                 onChange={(e) =>
-                                                    setAuthEmail(e.target.value)
+                                                    setLoginEmail(e.target.value)
                                                 }
                                                 placeholder="you@example.com"
                                             />
                                         </div>
-                                        {authStatus && (
-                                            <p className="auth-status">{authStatus}</p>
+                                        {loginError && (
+                                            <p className="error-text">{loginError}</p>
                                         )}
-                                        {authError && (
-                                            <p className="error-text">{authError}</p>
+                                        {loginStatus && (
+                                            <p className="small-text">{loginStatus}</p>
                                         )}
                                         <div className="form-actions">
                                             <button
                                                 type="submit"
                                                 className="btn-primary"
                                             >
-                                                Send sign-in link
+                                                Send login link
                                             </button>
                                         </div>
                                     </form>
@@ -1398,7 +1465,7 @@ function App() {
                             )}
                         </div>
 
-                        {/* Statusnone / social links card */}
+                        {/* About card */}
                         <div className="sheet-section">
                             <h2 className="sheet-title">About &amp; Links</h2>
                             <p className="small-text">
