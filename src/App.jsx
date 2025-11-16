@@ -47,6 +47,7 @@ function getSpotTypeIcon(type) {
     if (t === "city_stealth") return "🏙️";
     if (t === "campground") return "🏕️";
     if (t === "scenic_view") return "🌄";
+    if (t === "truck_stop") return "⛽";
     return "📍";
 }
 
@@ -83,6 +84,7 @@ function App() {
     const [errorMsg, setErrorMsg] = useState("");
     const [reviewError, setReviewError] = useState("");
     const [darkMode, setDarkMode] = useState(true); // default to dark / AMOLED
+    const [activePhoto, setActivePhoto] = useState(null); // full-screen photo viewer
 
     const center = [39.5, -98.35]; // Center of US
 
@@ -302,8 +304,8 @@ function App() {
                     <div>
                         <h1>Nomad Safe Spots</h1>
                         <p className="subtitle">
-                            Liquid-glass map of safe parking &amp; rest spots – free,
-                            community-powered.
+                            A free and easy to use map of safe parking &amp; rest spots –
+                            community powered.
                         </p>
                         <p className="brand-by">
                             Crafted by <span className="brand-name">Statusnone</span>
@@ -454,14 +456,21 @@ function App() {
                                             onChange={handleSpotInputChange}
                                         >
                                             <option value="forest_road">Forest road / BLM</option>
-                                            <option value="campground">Campground</option>
-                                            <option value="walmart">Walmart / big box lot</option>
-                                            <option value="rest_area">Highway rest area</option>
-                                            <option value="city_stealth">City stealth parking</option>
-                                            <option value="scenic_view">
-                                                Scenic view / overlook
+                                            <option value="campground">
+                                                Campground / RV park
                                             </option>
-                                            <option value="other">Other / misc</option>
+                                            <option value="walmart">
+                                                Store parking lot (Walmart etc)
+                                            </option>
+                                            <option value="rest_area">Highway rest area</option>
+                                            <option value="city_stealth">City street (stealth)</option>
+                                            <option value="truck_stop">
+                                                Truck stop / travel plaza
+                                            </option>
+                                            <option value="scenic_view">
+                                                Scenic viewpoint / overlook
+                                            </option>
+                                            <option value="other">Other / something else</option>
                                         </select>
                                     </div>
 
@@ -603,6 +612,9 @@ function App() {
                                             src={url}
                                             alt={`${selectedSpot.name} photo ${idx + 1}`}
                                             loading="lazy"
+                                            onClick={() =>
+                                                setActivePhoto({ url, name: selectedSpot.name })
+                                            }
                                         />
                                     ))}
                                 </div>
@@ -640,14 +652,17 @@ function App() {
                                 <div className="form-group inline">
                                     <div>
                                         <label>Rating (1–5)</label>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            max="5"
+                                        <select
                                             name="rating"
                                             value={reviewForm.rating}
                                             onChange={handleReviewInputChange}
-                                        />
+                                        >
+                                            <option value="5">5 - Amazing</option>
+                                            <option value="4">4 - Good</option>
+                                            <option value="3">3 - Okay</option>
+                                            <option value="2">2 - Sketchy</option>
+                                            <option value="1">1 - Avoid</option>
+                                        </select>
                                     </div>
                                     <div>
                                         <label>Nickname (optional)</label>
@@ -672,9 +687,7 @@ function App() {
                                     />
                                 </div>
 
-                                {reviewError && (
-                                    <p className="error-text">{reviewError}</p>
-                                )}
+                                {reviewError && <p className="error-text">{reviewError}</p>}
 
                                 <div className="form-actions">
                                     <button
@@ -742,6 +755,15 @@ function App() {
                         </div>
                     </div>
                 </aside>
+
+                {/* Full-screen photo viewer */}
+                {activePhoto && (
+                    <div className="photo-modal" onClick={() => setActivePhoto(null)}>
+                        <div className="photo-modal-inner">
+                            <img src={activePhoto.url} alt={activePhoto.name} />
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
