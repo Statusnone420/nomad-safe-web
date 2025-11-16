@@ -1,4 +1,5 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿// App.jsx
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     MapContainer,
     TileLayer,
@@ -161,6 +162,9 @@ function App() {
 
     // Map layer: "streets" | "satellite"
     const [mapLayer, setMapLayer] = useState("streets");
+
+    // Bottom sheet state (iOverlander-style)
+    const [sheetOpen, setSheetOpen] = useState(true);
 
     // Favorites (local)
     const [favoriteIds, setFavoriteIds] = useState(() => {
@@ -414,6 +418,7 @@ function App() {
         setSpotForm(initialSpotForm);
         setSpotPhotoFiles([]);
         setErrorMsg("");
+        setSheetOpen(true);
     }
 
     function cancelAddOrEdit() {
@@ -429,6 +434,7 @@ function App() {
         if (!adding) return;
         setPendingLocation({ lat, lng });
         setErrorMsg("");
+        setSheetOpen(true);
     }
 
     function handleSpotInputChange(e) {
@@ -590,6 +596,7 @@ function App() {
 
         setSelectedSpotId(savedSpot.id);
         cancelAddOrEdit();
+        setSheetOpen(true);
     }
 
     async function handleAddReview(e) {
@@ -713,6 +720,7 @@ function App() {
         setPendingLocation({ lat: spot.lat, lng: spot.lng });
         setErrorMsg("");
         setSpotPhotoFiles([]);
+        setSheetOpen(true);
 
         setSpotForm({
             name: spot.name || "",
@@ -730,6 +738,15 @@ function App() {
     }
 
     const appClassName = darkMode ? "app glass dark" : "app glass";
+
+    const sideColumnClassName = `side-column ${sheetOpen ? "side-column--open" : "side-column--collapsed"
+        }`;
+
+    const sheetHandleLabel = selectedSpot
+        ? selectedSpot.name
+        : adding
+            ? "Add a spot"
+            : "Spots nearby";
 
     return (
         <div className={appClassName}>
@@ -846,7 +863,7 @@ function App() {
                     </button>
                 </div>
 
-                {/* Map / Satellite toggle – moved into header so it doesn't cover the map */}
+                {/* Map / Satellite toggle */}
                 <div className="map-layer-toggle-row">
                     <div className="map-layer-toggle">
                         <button
@@ -908,7 +925,10 @@ function App() {
                                     key={spot.id}
                                     position={[spot.lat, spot.lng]}
                                     eventHandlers={{
-                                        click: () => setSelectedSpotId(spot.id),
+                                        click: () => {
+                                            setSelectedSpotId(spot.id);
+                                            setSheetOpen(true);
+                                        },
                                     }}
                                 >
                                     <Popup>
@@ -994,8 +1014,20 @@ function App() {
                     </div>
                 </div>
 
-                {/* Right-hand column: list + details/reviews/account */}
-                <div className="side-column">
+                {/* Bottom-sheet / side column */}
+                <div className={sideColumnClassName}>
+                    {/* Handle bar for mobile slide-up / slide-down */}
+                    <button
+                        type="button"
+                        className="sheet-handle-bar"
+                        onClick={() => setSheetOpen((prev) => !prev)}
+                    >
+                        <span className="sheet-handle-pill" />
+                        <span className="sheet-handle-label">
+                            {sheetHandleLabel}
+                        </span>
+                    </button>
+
                     {/* Spot list panel */}
                     <aside className="spot-list-panel">
                         <div className="spot-list-header">
@@ -1021,6 +1053,7 @@ function App() {
                                             }`}
                                         onClick={() => {
                                             setSelectedSpotId(spot.id);
+                                            setSheetOpen(true);
                                             if (mapRef.current) {
                                                 mapRef.current.setView(
                                                     [spot.lat, spot.lng],
@@ -1087,7 +1120,7 @@ function App() {
                         </div>
                     </aside>
 
-                    {/* Bottom sheet / sidebar */}
+                    {/* Bottom sheet content */}
                     <aside className="sheet">
                         {/* ADD / EDIT SPOT */}
                         {adding && (
