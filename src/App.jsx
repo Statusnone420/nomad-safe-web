@@ -82,7 +82,7 @@ function App() {
     const [status, setStatus] = useState("Connecting to Supabase…");
     const [errorMsg, setErrorMsg] = useState("");
     const [reviewError, setReviewError] = useState("");
-    const [darkMode, setDarkMode] = useState(false);
+    const [darkMode, setDarkMode] = useState(true); // default to dark / AMOLED
 
     const center = [39.5, -98.35]; // Center of US
 
@@ -302,7 +302,8 @@ function App() {
                     <div>
                         <h1>Nomad Safe Spots</h1>
                         <p className="subtitle">
-                            Liquid-glass map of safe parking & rest spots – free, community-powered.
+                            Liquid-glass map of safe parking &amp; rest spots – free,
+                            community-powered.
                         </p>
                         <p className="brand-by">
                             Crafted by <span className="brand-name">Statusnone</span>
@@ -693,12 +694,53 @@ function App() {
                         <div className="sheet-section">
                             <h2 className="sheet-title">Explore the map</h2>
                             <p className="small-text">
-                                Tap a pin to see details & reviews, or tap{" "}
+                                Tap a pin to see details &amp; reviews, or tap{" "}
                                 <strong>Add Spot</strong> to share a safe place you&apos;ve
                                 stayed.
                             </p>
                         </div>
                     )}
+
+                    {/* Statusnone / social links card */}
+                    <div className="sheet-section">
+                        <h2 className="sheet-title">About &amp; Links</h2>
+                        <p className="small-text">
+                            Nomad Safe Spots is a free, community-driven map built by{" "}
+                            <span className="brand-name">Statusnone</span> to help vanlifers
+                            and nomads find safe places to park, rest, and reset.
+                        </p>
+
+                        <div className="social-links">
+                            <a
+                                href="https://www.twitch.tv/statusnone"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                🎮 Twitch
+                            </a>
+                            <a
+                                href="https://www.youtube.com/@statusnone420"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                ▶️ YouTube
+                            </a>
+                            <a
+                                href="https://www.instagram.com/statusnone420/"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                📸 Instagram
+                            </a>
+                            <a
+                                href="https://x.com/Statusnone420"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                🐦 X / Twitter
+                            </a>
+                        </div>
+                    </div>
                 </aside>
             </div>
         </div>
