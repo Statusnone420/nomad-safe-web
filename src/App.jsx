@@ -133,8 +133,10 @@ function App() {
     const [userLocation, setUserLocation] = useState(null);
 
     const [filterType, setFilterType] = useState("any");
-    const [filterOvernightOnly, setFilterOvernightOnly] = useState(false);
-    const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
+    const [filterOvernightOnly, setFilterOvernightOnly] =
+        useState(false);
+    const [filterFavoritesOnly, setFilterFavoritesOnly] =
+        useState(false);
 
     // Local favorites (starred spots)
     const [favoriteIds, setFavoriteIds] = useState(() => {
@@ -148,6 +150,13 @@ function App() {
             return new Set();
         }
     });
+
+    // Supabase auth state
+    const [session, setSession] = useState(null);
+    const [authEmail, setAuthEmail] = useState("");
+    const [authStatus, setAuthStatus] = useState("");
+    const [authError, setAuthError] = useState("");
+    const [authLoading, setAuthLoading] = useState(true);
 
     useEffect(() => {
         try {
@@ -215,6 +224,38 @@ function App() {
         }
 
         loadData();
+    }, []);
+
+    // Auth bootstrap + listener
+    useEffect(() => {
+        let subscription;
+        async function initAuth() {
+            setAuthLoading(true);
+            const {
+                data: { session },
+                error,
+            } = await supabase.auth.getSession();
+            if (error) {
+                console.error("Error getting auth session:", error);
+            }
+            setSession(session ?? null);
+            setAuthLoading(false);
+
+            const { data } = supabase.auth.onAuthStateChange(
+                (_event, session) => {
+                    setSession(session ?? null);
+                }
+            );
+            subscription = data.subscription;
+        }
+
+        initAuth();
+
+        return () => {
+            if (subscription) {
+                subscription.unsubscribe();
+            }
+        };
     }, []);
 
     const selectedSpot = useMemo(
@@ -427,7 +468,11 @@ function App() {
             return;
         }
 
-        const rating = clamp(parseInt(reviewForm.rating, 10) || 0, 1, 5);
+        const rating = clamp(
+            parseInt(reviewForm.rating, 10) || 0,
+            1,
+            5
+        );
         if (!rating) {
             setReviewError("Rating 1–5 is required.");
             return;
@@ -461,6 +506,55 @@ function App() {
 
         setReviews((prev) => [data, ...prev]);
         setReviewForm(initialReviewForm);
+    }
+
+    async function handleSendLoginLink(e) {
+        e.preventDefault();
+        setAuthError("");
+        setAuthStatus("");
+
+        const email = authEmail.trim();
+        if (!email) {
+            setAuthError("Enter your email first.");
+            return;
+        }
+
+        try {
+            const redirectTo =
+                typeof window !== "undefined"
+                    ? window.location.origin
+                    : undefined;
+
+            const { error } = await supabase.auth.signInWithOtp({
+                email,
+                options: {
+                    emailRedirectTo: redirectTo,
+                    shouldCreateUser: true,
+                },
+            });
+
+            if (error) {
+                console.error("Error sending magic link:", error);
+                setAuthError(error.message);
+                return;
+            }
+
+            setAuthStatus("Check your email for a sign-in link.");
+        } catch (err) {
+            console.error(err);
+            setAuthError("Something went wrong sending the link.");
+        }
+    }
+
+    async function handleSignOut() {
+        setAuthError("");
+        setAuthStatus("");
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+            console.error("Error signing out:", error);
+            setAuthError(error.message);
+            return;
+        }
     }
 
     function handleLocateMe() {
@@ -498,6 +592,11 @@ function App() {
 
     const appClassName = darkMode ? "app glass dark" : "app glass";
 
+    const userEmail = session?.user?.email ?? null;
+    const userLabel = userEmail
+        ? userEmail.split("@")[0]
+        : null;
+
     return (
         <div className={appClassName}>
             <header className="app-header">
@@ -505,11 +604,12 @@ function App() {
                     <div className="brand-main">
                         <h1>Nomad Safe Spots</h1>
                         <p className="subtitle">
-                            A free and easy to use map of safe parking &amp; rest spots –
-                            community powered.
+                            A free and easy to use map of safe parking &amp; rest
+                            spots – community powered.
                         </p>
                         <p className="brand-by">
-                            Crafted by <span className="brand-name">Statusnone</span>
+                            Crafted by{" "}
+                            <span className="brand-name">Statusnone</span>
                         </p>
                     </div>
                     <div className="header-controls">
@@ -526,6 +626,22 @@ function App() {
                             onClick={() => setDarkMode((d) => !d)}
                         >
                             {darkMode ? "☀️ Light" : "🌙 Dark"}
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-ghost btn-ghost--account"
+                            onClick={() => {
+                                const accountEl =
+                                    document.getElementById("account-card");
+                                if (accountEl) {
+                                    accountEl.scrollIntoView({
+                                        behavior: "smooth",
+                                        block: "start",
+                                    });
+                                }
+                            }}
+                        >
+                            {userLabel ? `👤 ${userLabel}` : "🔐 Sign in"}
                         </button>
                     </div>
                 </div>
@@ -548,13 +664,27 @@ function App() {
                             className="filters-select"
                         >
                             <option value="any">Any</option>
-                            <option value="forest_road">Forest road / public land</option>
-                            <option value="campground">Campground / RV park</option>
-                            <option value="walmart">Store / plaza parking</option>
-                            <option value="rest_area">Highway rest area</option>
-                            <option value="city_stealth">City street / stealth</option>
-                            <option value="truck_stop">Truck stop / travel plaza</option>
-                            <option value="scenic_view">Scenic viewpoint / overlook</option>
+                            <option value="forest_road">
+                                Forest road / public land
+                            </option>
+                            <option value="campground">
+                                Campground / RV park
+                            </option>
+                            <option value="walmart">
+                                Store / plaza parking
+                            </option>
+                            <option value="rest_area">
+                                Highway rest area
+                            </option>
+                            <option value="city_stealth">
+                                City street / stealth
+                            </option>
+                            <option value="truck_stop">
+                                Truck stop / travel plaza
+                            </option>
+                            <option value="scenic_view">
+                                Scenic viewpoint / overlook
+                            </option>
                         </select>
                     </div>
 
@@ -562,7 +692,9 @@ function App() {
                         <input
                             type="checkbox"
                             checked={filterOvernightOnly}
-                            onChange={(e) => setFilterOvernightOnly(e.target.checked)}
+                            onChange={(e) =>
+                                setFilterOvernightOnly(e.target.checked)
+                            }
                         />
                         <span>Overnight only</span>
                     </label>
@@ -630,11 +762,15 @@ function App() {
                                             </div>
                                             <div>
                                                 Overnight allowed:{" "}
-                                                {spot.overnight_allowed ? "Yes" : "No / unknown"}
+                                                {spot.overnight_allowed
+                                                    ? "Yes"
+                                                    : "No / unknown"}
                                             </div>
                                             <div>
                                                 Bathrooms:{" "}
-                                                {spot.has_bathroom ? "Yes" : "No / nearby / ?"}
+                                                {spot.has_bathroom
+                                                    ? "Yes"
+                                                    : "No / nearby / ?"}
                                             </div>
                                             <div>
                                                 Cell: {spot.cell_signal ?? 0} / 5 bars
@@ -967,8 +1103,8 @@ function App() {
                                                 placeholder="https://..., https://..."
                                             />
                                             <p className="tiny-text">
-                                                For now, paste image URLs hosted elsewhere. Later
-                                                we’ll add direct uploads.
+                                                For now, paste image URLs hosted elsewhere.
+                                                Later we’ll add direct uploads.
                                             </p>
                                         </div>
 
@@ -1190,14 +1326,87 @@ function App() {
                             </div>
                         )}
 
+                        {/* ACCOUNT CARD */}
+                        <div className="sheet-section" id="account-card">
+                            <h2 className="sheet-title">Account</h2>
+                            {authLoading ? (
+                                <p className="small-text">Checking your login…</p>
+                            ) : session && userEmail ? (
+                                <>
+                                    <p className="small-text">
+                                        Signed in as <strong>{userEmail}</strong>.
+                                    </p>
+                                    <p className="tiny-text">
+                                        Right now login is optional – spots and reviews
+                                        still work without an account. Later we can use
+                                        this to manage your spots, edit them, and sync
+                                        favorites.
+                                    </p>
+                                    {authStatus && (
+                                        <p className="auth-status">{authStatus}</p>
+                                    )}
+                                    {authError && (
+                                        <p className="error-text">{authError}</p>
+                                    )}
+                                    <div className="form-actions">
+                                        <button
+                                            type="button"
+                                            className="btn-secondary"
+                                            onClick={handleSignOut}
+                                        >
+                                            Sign out
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="small-text">
+                                        Sign in with a one-time link sent to your email.
+                                        No passwords to remember.
+                                    </p>
+                                    <form
+                                        className="spot-form"
+                                        onSubmit={handleSendLoginLink}
+                                    >
+                                        <div className="form-group">
+                                            <label>Email</label>
+                                            <input
+                                                type="text"
+                                                value={authEmail}
+                                                onChange={(e) =>
+                                                    setAuthEmail(e.target.value)
+                                                }
+                                                placeholder="you@example.com"
+                                            />
+                                        </div>
+                                        {authStatus && (
+                                            <p className="auth-status">{authStatus}</p>
+                                        )}
+                                        {authError && (
+                                            <p className="error-text">{authError}</p>
+                                        )}
+                                        <div className="form-actions">
+                                            <button
+                                                type="submit"
+                                                className="btn-primary"
+                                            >
+                                                Send sign-in link
+                                            </button>
+                                        </div>
+                                    </form>
+                                </>
+                            )}
+                        </div>
+
                         {/* Statusnone / social links card */}
                         <div className="sheet-section">
                             <h2 className="sheet-title">About &amp; Links</h2>
                             <p className="small-text">
                                 Nomad Safe Spots is a free, community-driven map
-                                built by <span className="brand-name">Statusnone</span>{" "}
-                                to help vanlifers and nomads find safe places to
-                                park, rest, and reset.
+                                built by{" "}
+                                <span className="brand-name">Statusnone</span> to
+                                help vanlifers and nomads find safe places to park,
+                                rest, and reset.
                             </p>
 
                             <div className="social-links">

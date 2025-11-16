@@ -648,6 +648,14 @@ input[type="number"],
     transform: translateY(-1px);
 }
 
+/* keep account button text from wrapping ugly */
+.btn-ghost--account {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ==== PHOTOS ==== */
 
 .photo-strip {
@@ -754,6 +762,13 @@ input[type="number"],
 .tiny-text {
     font-size: 0.7rem;
     color: #9ca3af;
+}
+
+/* account status message */
+
+.auth-status {
+    font-size: 0.76rem;
+    color: #22c55e;
 }
 
 /* ==== SOCIAL LINKS ==== */
