@@ -15,7 +15,7 @@ import markerShadow from "leaflet/dist/images/marker-shadow.png";
 
 import { supabase } from "./supabaseClient";
 
-// Fix default marker icon paths
+// Fix default Leaflet marker paths
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: markerIcon2x,
@@ -38,7 +38,7 @@ function clamp(num, min, max) {
     return Math.min(Math.max(num, min), max);
 }
 
-// Haversine distance in km (for "Spots nearby" list)
+// Haversine distance in km (for "Spots nearby")
 function haversineDistanceKm(a, b) {
     if (!a || !b) return null;
     const R = 6371;
@@ -115,35 +115,34 @@ const initialReviewForm = {
 };
 
 function App() {
-    // ---- core data ----
     const [spots, setSpots] = useState([]);
     const [reviews, setReviews] = useState([]);
-
-    // ---- add spot / reviews ----
-    const [adding, setAdding] = useState(false);
+    const [adding, setAdding] = useState(false); // using sheet for add/edit
+    const [editMode, setEditMode] = useState(false);
+    const [editingSpotId, setEditingSpotId] = useState(null);
     const [pendingLocation, setPendingLocation] = useState(null);
     const [spotForm, setSpotForm] = useState(initialSpotForm);
     const [reviewForm, setReviewForm] = useState(initialReviewForm);
     const [selectedSpotId, setSelectedSpotId] = useState(null);
-
-    // ---- loading / status ----
     const [loading, setLoading] = useState(true);
     const [savingSpot, setSavingSpot] = useState(false);
     const [savingReview, setSavingReview] = useState(false);
     const [status, setStatus] = useState("Connecting to Supabase…");
     const [errorMsg, setErrorMsg] = useState("");
     const [reviewError, setReviewError] = useState("");
-
-    // ---- theme / photos / location ----
-    const [darkMode, setDarkMode] = useState(true); // AMOLED default
+    const [darkMode, setDarkMode] = useState(true);
     const [activePhoto, setActivePhoto] = useState(null);
     const [userLocation, setUserLocation] = useState(null);
 
-    // ---- filters / favorites ----
     const [filterType, setFilterType] = useState("any");
     const [filterOvernightOnly, setFilterOvernightOnly] = useState(false);
     const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
 
+    // Auth
+    const [currentUser, setCurrentUser] = useState(null);
+    const [authBusy, setAuthBusy] = useState(false);
+
+    // Local favorites (starred spots)
     const [favoriteIds, setFavoriteIds] = useState(() => {
         if (typeof window === "undefined") return new Set();
         try {
@@ -156,21 +155,11 @@ function App() {
         }
     });
 
-    // ---- auth ----
-    const [user, setUser] = useState(null);
-    const [authLoading, setAuthLoading] = useState(true);
-    const [loginEmail, setLoginEmail] = useState("");
-    const [loginStatus, setLoginStatus] = useState("");
-    const [loginError, setLoginError] = useState("");
-
-    // ---- NEW: local photo upload state ----
+    // Photo upload state
     const [spotPhotoFiles, setSpotPhotoFiles] = useState([]);
     const [uploadingPhotos, setUploadingPhotos] = useState(false);
+    const fileInputRef = useRef(null);
 
-    const mapRef = useRef(null);
-    const center = [39.5, -98.35]; // Center of US
-
-    // ---- persist favorites ----
     useEffect(() => {
         try {
             window.localStorage.setItem(
@@ -196,7 +185,10 @@ function App() {
 
     const isFavorite = (spotId) => favoriteIds.has(spotId);
 
-    // ---- load spots + reviews ----
+    const mapRef = useRef(null);
+    const center = [39.5, -98.35]; // Center of US
+
+    // Load spots + reviews
     useEffect(() => {
         async function loadData() {
             setStatus("Loading spots and reviews from Supabase…");
@@ -236,37 +228,27 @@ function App() {
         loadData();
     }, []);
 
-    // ---- auth: keep user in sync ----
+    // Auth: get current user and subscribe to changes
     useEffect(() => {
-        let mounted = true;
+        let subscription;
 
-        async function getInitialSession() {
-            const {
-                data: { session },
-                error,
-            } = await supabase.auth.getSession();
-
-            if (!mounted) return;
-
-            if (error) {
-                console.error("Error getting auth session:", error);
+        (async () => {
+            const { data, error } = await supabase.auth.getUser();
+            if (!error && data?.user) {
+                setCurrentUser(data.user);
             }
-            setUser(session?.user ?? null);
-            setAuthLoading(false);
-        }
 
-        getInitialSession();
+            const { data: listener } = supabase.auth.onAuthStateChange(
+                (_event, session) => {
+                    setCurrentUser(session?.user ?? null);
+                }
+            );
 
-        const {
-            data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!mounted) return;
-            setUser(session?.user ?? null);
-        });
+            subscription = listener?.subscription;
+        })();
 
         return () => {
-            mounted = false;
-            subscription.unsubscribe();
+            if (subscription) subscription.unsubscribe();
         };
     }, []);
 
@@ -312,6 +294,7 @@ function App() {
         return list;
     }, [spots, filterType, filterOvernightOnly, filterFavoritesOnly, favoriteIds]);
 
+    // For the side "Spots nearby" list
     const spotsForList = useMemo(() => {
         return filteredSpots
             .map((spot) => {
@@ -360,24 +343,47 @@ function App() {
             });
     }, [filteredSpots, userLocation, favoriteIds, reviews]);
 
-    // ---- add spot / reviews helpers ----
+    // Add / edit flow
 
     function startAdding() {
         setAdding(true);
+        setEditMode(false);
+        setEditingSpotId(null);
         setPendingLocation(null);
         setSpotForm(initialSpotForm);
-        setErrorMsg("");
         setSpotPhotoFiles([]);
-        setUploadingPhotos(false);
+        setErrorMsg("");
+    }
+
+    function startEditingSpot(spot) {
+        if (!spot) return;
+        setAdding(true);
+        setEditMode(true);
+        setEditingSpotId(spot.id);
+        setPendingLocation({ lat: spot.lat, lng: spot.lng });
+        setSpotForm({
+            name: spot.name || "",
+            description: spot.description || "",
+            overnightAllowed: !!spot.overnight_allowed,
+            hasBathroom: !!spot.has_bathroom,
+            cellSignal: spot.cell_signal ?? 3,
+            noiseLevel: spot.noise_level || "quiet",
+            safetyRating: spot.safety_rating ?? 4,
+            spotType: spot.spot_type || "forest_road",
+            photoUrls: (spot.photo_urls || []).join(", "),
+        });
+        setSpotPhotoFiles([]);
+        setErrorMsg("");
     }
 
     function cancelAdding() {
         setAdding(false);
+        setEditMode(false);
+        setEditingSpotId(null);
         setPendingLocation(null);
         setSpotForm(initialSpotForm);
-        setErrorMsg("");
         setSpotPhotoFiles([]);
-        setUploadingPhotos(false);
+        setErrorMsg("");
     }
 
     function handleMapClick(lat, lng) {
@@ -402,91 +408,14 @@ function App() {
         }));
     }
 
-    // ---- auth handlers ----
-
-    async function handleLogin(e) {
-        e.preventDefault();
-        setLoginError("");
-        setLoginStatus("");
-
-        if (!loginEmail.trim()) {
-            setLoginError("Enter an email address.");
-            return;
-        }
-
-        setLoginStatus("Sending magic link…");
-
-        const { error } = await supabase.auth.signInWithOtp({
-            email: loginEmail.trim(),
-            options: {
-                emailRedirectTo: window.location.origin,
-            },
-        });
-
-        if (error) {
-            console.error("Error sending magic link:", error);
-            setLoginError(error.message);
-            setLoginStatus("");
-            return;
-        }
-
-        setLoginStatus("Check your email for a login link.");
+    function handlePhotoFileChange(e) {
+        const files = Array.from(e.target.files || []).slice(0, 4);
+        setSpotPhotoFiles(files);
     }
-
-    async function handleLogout() {
-        await supabase.auth.signOut();
-        setLoginStatus("");
-        setLoginError("");
-    }
-
-    // ---- NEW: upload photos helper ----
-
-    async function uploadSpotPhotos(files, userId) {
-        if (!files.length) return [];
-
-        setUploadingPhotos(true);
-
-        try {
-            const uploads = await Promise.all(
-                files.map(async (file, index) => {
-                    const ext = file.name.split(".").pop() || "jpg";
-                    const path = `${userId}/${Date.now()}-${index}.${ext}`;
-
-                    const { error: uploadError } = await supabase.storage
-                        .from("spot-photos")
-                        .upload(path, file, {
-                            cacheControl: "3600",
-                            upsert: false,
-                        });
-
-                    if (uploadError) {
-                        throw uploadError;
-                    }
-
-                    const { data } = supabase.storage
-                        .from("spot-photos")
-                        .getPublicUrl(path);
-
-                    return data.publicUrl;
-                })
-            );
-
-            return uploads;
-        } finally {
-            setUploadingPhotos(false);
-        }
-    }
-
-    // ---- save spot (with photo upload) ----
 
     async function handleSaveSpot(e) {
         e.preventDefault();
         setErrorMsg("");
-
-        if (!adding) {
-            setErrorMsg("Tap “Add Spot” first.");
-            return;
-        }
 
         if (!pendingLocation) {
             setErrorMsg("Tap on the map to choose a location.");
@@ -495,6 +424,14 @@ function App() {
 
         if (!spotForm.name.trim()) {
             setErrorMsg("Name is required.");
+            return;
+        }
+
+        // If user selected photos but isn't logged in, bail early with a clear message
+        if (spotPhotoFiles.length > 0 && !currentUser) {
+            setErrorMsg(
+                "To upload photos, please sign in first. You can still save the spot without photos."
+            );
             return;
         }
 
@@ -512,69 +449,124 @@ function App() {
         const noise_level = spotForm.noiseLevel || "unknown";
         const spot_type = spotForm.spotType || "other";
 
-        let photo_urls = [];
+        // Parse manual URLs
+        let manualUrls = [];
         if (spotForm.photoUrls.trim()) {
-            photo_urls = spotForm.photoUrls
+            manualUrls = spotForm.photoUrls
                 .split(",")
                 .map((u) => u.trim())
                 .filter(Boolean);
         }
 
-        // If the user picked local files, we try to upload them.
-        if (spotPhotoFiles.length > 0) {
-            if (!user) {
-                setErrorMsg(
-                    "Sign in to upload photos, or remove the selected files to save without photos."
-                );
-                return;
-            }
-
-            try {
-                const uploaded = await uploadSpotPhotos(
-                    spotPhotoFiles,
-                    user.id
-                );
-                photo_urls = [...photo_urls, ...uploaded];
-            } catch (err) {
-                console.error("Photo upload error:", err);
-                setErrorMsg(
-                    "Error uploading photos. Try again, or save the spot without files."
-                );
-                return;
-            }
-        }
-
         setSavingSpot(true);
 
-        const { data, error } = await supabase
-            .from("spots")
-            .insert({
-                name: spotForm.name.trim(),
-                description: spotForm.description.trim(),
-                lat,
-                lng,
-                overnight_allowed: spotForm.overnightAllowed,
-                has_bathroom: spotForm.hasBathroom,
-                cell_signal,
-                noise_level,
-                safety_rating,
-                spot_type,
-                photo_urls,
-            })
-            .select()
-            .single();
+        // Upload any new photos to Supabase storage
+        let uploadedUrls = [];
+        if (spotPhotoFiles.length > 0) {
+            setUploadingPhotos(true);
+            try {
+                for (const file of spotPhotoFiles) {
+                    const ext =
+                        file.name.split(".").pop()?.toLowerCase() || "jpg";
+                    const path = `${currentUser?.id || "anon"
+                        }/${Date.now()}-${Math.random()
+                            .toString(36)
+                            .slice(2)}.${ext}`;
 
-        setSavingSpot(false);
+                    const { error: uploadError } = await supabase.storage
+                        .from("spot-photos")
+                        .upload(path, file, {
+                            cacheControl: "3600",
+                            upsert: false,
+                        });
 
-        if (error) {
-            console.error("Error saving spot:", error);
-            setErrorMsg("Failed to save spot: " + error.message);
-            return;
+                    if (uploadError) {
+                        console.error("Upload error:", uploadError);
+                        throw uploadError;
+                    }
+
+                    const { data: publicData } = supabase.storage
+                        .from("spot-photos")
+                        .getPublicUrl(path);
+
+                    if (publicData?.publicUrl) {
+                        uploadedUrls.push(publicData.publicUrl);
+                    }
+                }
+            } catch (err) {
+                console.error("Error uploading photos:", err);
+                setSavingSpot(false);
+                setUploadingPhotos(false);
+                setErrorMsg(
+                    "Failed to upload photos. You can try again or save without photos."
+                );
+                return;
+            } finally {
+                setUploadingPhotos(false);
+            }
         }
 
-        setSpots((prev) => [...prev, data]);
-        setSelectedSpotId(data.id);
-        cancelAdding();
+        const combinedPhotoUrls = [...manualUrls, ...uploadedUrls];
+
+        const payload = {
+            name: spotForm.name.trim(),
+            description: spotForm.description.trim(),
+            lat,
+            lng,
+            overnight_allowed: spotForm.overnightAllowed,
+            has_bathroom: spotForm.hasBathroom,
+            cell_signal,
+            noise_level,
+            safety_rating,
+            spot_type,
+            photo_urls: combinedPhotoUrls, // empty array if none
+        };
+
+        try {
+            if (editMode && editingSpotId != null) {
+                // UPDATE existing spot (no .single() to avoid "Cannot coerce..." errors)
+                const { error } = await supabase
+                    .from("spots")
+                    .update(payload)
+                    .eq("id", editingSpotId);
+
+                if (error) {
+                    console.error("Error updating spot:", error);
+                    setErrorMsg("Failed to save spot: " + error.message);
+                } else {
+                    // update local state manually
+                    setSpots((prev) =>
+                        prev.map((s) =>
+                            s.id === editingSpotId ? { ...s, ...payload } : s
+                        )
+                    );
+                    setSelectedSpotId(editingSpotId);
+                    cancelAdding();
+                }
+            } else {
+                // INSERT new spot
+                const { data, error } = await supabase
+                    .from("spots")
+                    .insert(payload)
+                    .select()
+                    .single();
+
+                if (error) {
+                    console.error("Error saving spot:", error);
+                    setErrorMsg("Failed to save spot: " + error.message);
+                } else if (data) {
+                    setSpots((prev) => [...prev, data]);
+                    setSelectedSpotId(data.id);
+                    cancelAdding();
+                }
+            }
+        } finally {
+            setSavingSpot(false);
+            setSpotPhotoFiles([]);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = "";
+            }
+        }
     }
 
     async function handleAddReview(e) {
@@ -655,6 +647,37 @@ function App() {
         window.open(url, "_blank");
     }
 
+    async function handleSignIn() {
+        if (authBusy) return;
+        const email = window.prompt(
+            "Enter your email address to receive a login link:"
+        );
+        if (!email) return;
+
+        setAuthBusy(true);
+        const { error } = await supabase.auth.signInWithOtp({
+            email,
+            options: {
+                emailRedirectTo: window.location.origin,
+            },
+        });
+        setAuthBusy(false);
+
+        if (error) {
+            console.error("Auth error:", error);
+            alert("Login failed: " + error.message);
+        } else {
+            alert("Check your email for the login link.");
+        }
+    }
+
+    async function handleSignOut() {
+        if (authBusy) return;
+        setAuthBusy(true);
+        await supabase.auth.signOut();
+        setAuthBusy(false);
+    }
+
     const appClassName = darkMode ? "app glass dark" : "app glass";
 
     return (
@@ -668,7 +691,8 @@ function App() {
                             spots – community powered.
                         </p>
                         <p className="brand-by">
-                            Crafted by <span className="brand-name">Statusnone</span>
+                            Crafted by{" "}
+                            <span className="brand-name">Statusnone</span>
                         </p>
                     </div>
                     <div className="header-controls">
@@ -686,14 +710,17 @@ function App() {
                         >
                             {darkMode ? "☀️ Light" : "🌙 Dark"}
                         </button>
-                        {user && (
-                            <div className="account-pill">
-                                <span className="account-pill-dot" />
-                                <span className="account-pill-email">
-                                    {user.email}
-                                </span>
-                            </div>
-                        )}
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={currentUser ? handleSignOut : handleSignIn}
+                        >
+                            {currentUser
+                                ? currentUser.email || "Signed in"
+                                : authBusy
+                                    ? "Sending link…"
+                                    : "Sign in"}
+                        </button>
                     </div>
                 </div>
 
@@ -721,9 +748,7 @@ function App() {
                             <option value="campground">
                                 Campground / RV park
                             </option>
-                            <option value="walmart">
-                                Store / plaza parking
-                            </option>
+                            <option value="walmart">Store / plaza parking</option>
                             <option value="rest_area">Highway rest area</option>
                             <option value="city_stealth">
                                 City street / stealth
@@ -741,7 +766,9 @@ function App() {
                         <input
                             type="checkbox"
                             checked={filterOvernightOnly}
-                            onChange={(e) => setFilterOvernightOnly(e.target.checked)}
+                            onChange={(e) =>
+                                setFilterOvernightOnly(e.target.checked)
+                            }
                         />
                         <span>Overnight only</span>
                     </label>
@@ -750,7 +777,9 @@ function App() {
                         type="button"
                         className={`filter-chip ${filterFavoritesOnly ? "filter-chip--active" : ""
                             }`}
-                        onClick={() => setFilterFavoritesOnly((prev) => !prev)}
+                        onClick={() =>
+                            setFilterFavoritesOnly((prev) => !prev)
+                        }
                     >
                         ⭐ Favorites
                     </button>
@@ -805,15 +834,21 @@ function App() {
                                                 Type:{" "}
                                                 {(spot.spot_type || "other")
                                                     .replace("_", " ")
-                                                    .replace(/\b\w/g, (c) => c.toUpperCase())}
+                                                    .replace(/\b\w/g, (c) =>
+                                                        c.toUpperCase()
+                                                    )}
                                             </div>
                                             <div>
                                                 Overnight allowed:{" "}
-                                                {spot.overnight_allowed ? "Yes" : "No / unknown"}
+                                                {spot.overnight_allowed
+                                                    ? "Yes"
+                                                    : "No / unknown"}
                                             </div>
                                             <div>
                                                 Bathrooms:{" "}
-                                                {spot.has_bathroom ? "Yes" : "No / nearby / ?"}
+                                                {spot.has_bathroom
+                                                    ? "Yes"
+                                                    : "No / nearby / ?"}
                                             </div>
                                             <div>
                                                 Cell: {spot.cell_signal ?? 0} / 5 bars
@@ -831,9 +866,16 @@ function App() {
 
                             {adding && pendingLocation && (
                                 <Marker
-                                    position={[pendingLocation.lat, pendingLocation.lng]}
+                                    position={[
+                                        pendingLocation.lat,
+                                        pendingLocation.lng,
+                                    ]}
                                 >
-                                    <Popup>New spot location (not saved yet)</Popup>
+                                    <Popup>
+                                        {editMode
+                                            ? "Edit spot location (not saved yet)"
+                                            : "New spot location (not saved yet)"}
+                                    </Popup>
                                 </Marker>
                             )}
 
@@ -848,7 +890,7 @@ function App() {
                     </div>
                 </div>
 
-                {/* Right-hand column: list + details/reviews + account */}
+                {/* Right-hand column: list + details/reviews */}
                 <div className="side-column">
                     {/* Spot list panel */}
                     <aside className="spot-list-panel">
@@ -937,10 +979,12 @@ function App() {
 
                     {/* Bottom sheet / sidebar */}
                     <aside className="sheet">
-                        {/* When adding a spot */}
+                        {/* Add / Edit Spot */}
                         {adding && (
                             <div className="sheet-section">
-                                <h2 className="sheet-title">Add a New Spot</h2>
+                                <h2 className="sheet-title">
+                                    {editMode ? "Edit Spot" : "Add a New Spot"}
+                                </h2>
 
                                 {!pendingLocation && (
                                     <p className="small-text highlight">
@@ -1136,7 +1180,6 @@ function App() {
                                             </select>
                                         </div>
 
-                                        {/* Existing URL-based images still allowed */}
                                         <div className="form-group">
                                             <label>Photo URLs (comma-separated)</label>
                                             <input
@@ -1146,36 +1189,27 @@ function App() {
                                                 onChange={handleSpotInputChange}
                                                 placeholder="https://..., https://..."
                                             />
+                                            <p className="tiny-text">
+                                                You can paste image URLs here. These will be
+                                                stored alongside any uploaded photos.
+                                            </p>
                                         </div>
 
-                                        {/* NEW: file upload for photos */}
                                         <div className="form-group">
                                             <label>
-                                                Upload photos{" "}
-                                                <span className="tiny-text">
-                                                    (requires login)
-                                                </span>
+                                                Upload photos (optional)
                                             </label>
                                             <input
+                                                ref={fileInputRef}
                                                 type="file"
-                                                accept="image/*"
                                                 multiple
-                                                onChange={(e) =>
-                                                    setSpotPhotoFiles(
-                                                        Array.from(e.target.files || [])
-                                                    )
-                                                }
+                                                accept="image/*"
+                                                onChange={handlePhotoFileChange}
                                             />
-                                            {spotPhotoFiles.length > 0 && (
-                                                <p className="tiny-text">
-                                                    {spotPhotoFiles.length} file
-                                                    {spotPhotoFiles.length === 1 ? "" : "s"} selected
-                                                    {uploadingPhotos && " · uploading…"}
-                                                </p>
-                                            )}
                                             <p className="tiny-text">
-                                                You can mix hosted URLs and uploaded files. Uploaded
-                                                images are stored in Supabase Storage.
+                                                Select 1–4 photos from your device. They’ll
+                                                be uploaded to Supabase storage and linked to
+                                                this spot.
                                             </p>
                                         </div>
 
@@ -1198,8 +1232,12 @@ function App() {
                                                 disabled={savingSpot || uploadingPhotos}
                                             >
                                                 {savingSpot || uploadingPhotos
-                                                    ? "Saving…"
-                                                    : "Save Spot"}
+                                                    ? editMode
+                                                        ? "Saving…"
+                                                        : "Saving…"
+                                                    : editMode
+                                                        ? "Save changes"
+                                                        : "Save Spot"}
                                             </button>
                                         </div>
                                     </form>
@@ -1207,7 +1245,7 @@ function App() {
                             </div>
                         )}
 
-                        {/* When viewing a spot / reviews */}
+                        {/* Spot details + reviews */}
                         {!adding && selectedSpot && (
                             <div className="sheet-section">
                                 <div className="sheet-title-row">
@@ -1251,7 +1289,9 @@ function App() {
                                 <div className="sheet-meta-row">
                                     <span>
                                         {selectedSpotAverageRating
-                                            ? `⭐ ${selectedSpotAverageRating.toFixed(1)}`
+                                            ? `⭐ ${selectedSpotAverageRating.toFixed(
+                                                1
+                                            )}`
                                             : "No reviews yet"}
                                     </span>
                                     <span>
@@ -1291,6 +1331,13 @@ function App() {
                                         onClick={() => openSpotInMaps(selectedSpot)}
                                     >
                                         Open in Maps
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-secondary"
+                                        onClick={() => startEditingSpot(selectedSpot)}
+                                    >
+                                        Edit spot
                                     </button>
                                 </div>
 
@@ -1402,70 +1449,47 @@ function App() {
                         {/* Account card */}
                         <div className="sheet-section">
                             <h2 className="sheet-title">Account</h2>
-                            {authLoading ? (
-                                <p className="small-text">Checking login…</p>
-                            ) : user ? (
-                                <>
-                                    <p className="small-text">
-                                        Signed in as <strong>{user.email}</strong>.
-                                    </p>
-                                    <p className="small-text">
-                                        Right now login is optional – spots and reviews
-                                        still work without an account. Later we can use
-                                        this to manage your spots, edit them, and sync
-                                        favorites.
-                                    </p>
-                                    <div className="form-actions">
-                                        <button
-                                            type="button"
-                                            className="btn-secondary"
-                                            onClick={handleLogout}
-                                        >
-                                            Sign out
-                                        </button>
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <p className="small-text">
-                                        Login is optional, but required to upload photos
-                                        and (later) manage your own spots.
-                                    </p>
-                                    <form
-                                        className="spot-form"
-                                        onSubmit={handleLogin}
-                                    >
-                                        <div className="form-group">
-                                            <label>Email</label>
-                                            <input
-                                                type="text"
-                                                value={loginEmail}
-                                                onChange={(e) =>
-                                                    setLoginEmail(e.target.value)
-                                                }
-                                                placeholder="you@example.com"
-                                            />
-                                        </div>
-                                        {loginError && (
-                                            <p className="error-text">{loginError}</p>
-                                        )}
-                                        {loginStatus && (
-                                            <p className="small-text">{loginStatus}</p>
-                                        )}
-                                        <div className="form-actions">
-                                            <button
-                                                type="submit"
-                                                className="btn-primary"
-                                            >
-                                                Send login link
-                                            </button>
-                                        </div>
-                                    </form>
-                                </>
+                            <p className="small-text">
+                                {currentUser ? (
+                                    <>
+                                        Signed in as{" "}
+                                        <strong>{currentUser.email}</strong>.
+                                    </>
+                                ) : (
+                                    "You are not signed in. Login is optional – spots and reviews still work without an account."
+                                )}
+                            </p>
+                            {currentUser && (
+                                <p className="small-text">
+                                    Right now login is optional – later we can use
+                                    this to manage your spots, edit them, and sync
+                                    favorites.
+                                </p>
                             )}
+                            <div className="spot-actions">
+                                {currentUser ? (
+                                    <button
+                                        type="button"
+                                        className="btn-secondary"
+                                        onClick={handleSignOut}
+                                        disabled={authBusy}
+                                    >
+                                        {authBusy ? "Signing out…" : "Sign out"}
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="btn-primary"
+                                        onClick={handleSignIn}
+                                        disabled={authBusy}
+                                    >
+                                        {authBusy ? "Sending link…" : "Sign in"}
+                                    </button>
+                                )}
+                            </div>
                         </div>
 
-                        {/* About card */}
+                        {/* About / links */}
                         <div className="sheet-section">
                             <h2 className="sheet-title">About &amp; Links</h2>
                             <p className="small-text">
