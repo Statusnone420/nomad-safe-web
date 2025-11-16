@@ -118,6 +118,55 @@ body {
     margin-top: 6px;
 }
 
+/* ==== FILTERS ==== */
+
+.filters-row {
+    margin-top: 0.4rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+    font-size: 0.8rem;
+}
+
+.filters-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.filters-label {
+    font-size: 0.76rem;
+    color: #9ca3af;
+}
+
+.filters-select {
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid rgba(55, 65, 81, 0.9);
+    background: rgba(15, 23, 42, 0.96);
+    color: #e5e7eb;
+    font-size: 0.8rem;
+}
+
+.app:not(.dark) .filters-select {
+    background: rgba(248, 250, 252, 0.96);
+    border-color: rgba(148, 163, 184, 0.9);
+    color: #0f172a;
+}
+
+.filters-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+    color: #9ca3af;
+}
+
+    .filters-toggle input[type="checkbox"] {
+        margin: 0;
+    }
+
 /* ==== MAIN LAYOUT ==== */
 
 .main-content {
@@ -423,6 +472,16 @@ body {
 .review-comment {
     font-size: 0.84rem;
     margin: 0;
+}
+
+/* Spot actions row (Open in Maps, etc.) */
+
+.spot-actions {
+    margin-top: 0.35rem;
+    margin-bottom: 0.2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 /* ==== MISC ==== */

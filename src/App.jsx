@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import {
     MapContainer,
     TileLayer,
@@ -85,6 +85,12 @@ function App() {
     const [reviewError, setReviewError] = useState("");
     const [darkMode, setDarkMode] = useState(true); // default to dark / AMOLED
     const [activePhoto, setActivePhoto] = useState(null); // full-screen photo viewer
+    const [userLocation, setUserLocation] = useState(null);
+
+    const [filterType, setFilterType] = useState("any");
+    const [filterOvernightOnly, setFilterOvernightOnly] = useState(false);
+
+    const mapRef = useRef(null);
 
     const center = [39.5, -98.35]; // Center of US
 
@@ -143,6 +149,22 @@ function App() {
         const sum = selectedSpotReviews.reduce((acc, r) => acc + (r.rating || 0), 0);
         return sum / selectedSpotReviews.length;
     }, [selectedSpotReviews]);
+
+    const filteredSpots = useMemo(() => {
+        let list = spots;
+
+        if (filterType !== "any") {
+            list = list.filter(
+                (s) => (s.spot_type || "other").toLowerCase() === filterType
+            );
+        }
+
+        if (filterOvernightOnly) {
+            list = list.filter((s) => !!s.overnight_allowed);
+        }
+
+        return list;
+    }, [spots, filterType, filterOvernightOnly]);
 
     function startAdding() {
         setAdding(true);
@@ -295,6 +317,39 @@ function App() {
         setReviewForm(initialReviewForm);
     }
 
+    function handleLocateMe() {
+        if (!navigator.geolocation) {
+            setStatus("Geolocation is not supported in this browser.");
+            return;
+        }
+
+        setStatus("Finding your location…");
+
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const { latitude, longitude } = pos.coords;
+                const loc = { lat: latitude, lng: longitude };
+                setUserLocation(loc);
+                if (mapRef.current) {
+                    mapRef.current.setView([latitude, longitude], 9);
+                }
+                setStatus((prev) =>
+                    prev.startsWith("Finding") ? "Location updated." : prev
+                );
+            },
+            (err) => {
+                console.error("Geolocation error:", err);
+                setStatus("Could not get location: " + err.message);
+            }
+        );
+    }
+
+    function openSpotInMaps(spot) {
+        if (!spot) return;
+        const url = `https://www.google.com/maps?q=${spot.lat},${spot.lng}`;
+        window.open(url, "_blank");
+    }
+
     const appClassName = darkMode ? "app glass dark" : "app glass";
 
     return (
@@ -315,6 +370,13 @@ function App() {
                         <button
                             type="button"
                             className="btn-ghost"
+                            onClick={handleLocateMe}
+                        >
+                            📍 My location
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-ghost"
                             onClick={() => setDarkMode((d) => !d)}
                         >
                             {darkMode ? "☀️ Light" : "🌙 Dark"}
@@ -330,6 +392,36 @@ function App() {
                     </button>
                 </div>
 
+                {/* Filters */}
+                <div className="filters-row">
+                    <div className="filters-group">
+                        <label className="filters-label">Type</label>
+                        <select
+                            value={filterType}
+                            onChange={(e) => setFilterType(e.target.value)}
+                            className="filters-select"
+                        >
+                            <option value="any">Any</option>
+                            <option value="forest_road">Forest / BLM</option>
+                            <option value="campground">Campground / RV</option>
+                            <option value="walmart">Store parking</option>
+                            <option value="rest_area">Rest area</option>
+                            <option value="city_stealth">City / stealth</option>
+                            <option value="truck_stop">Truck stop</option>
+                            <option value="scenic_view">Scenic view</option>
+                        </select>
+                    </div>
+
+                    <label className="filters-toggle">
+                        <input
+                            type="checkbox"
+                            checked={filterOvernightOnly}
+                            onChange={(e) => setFilterOvernightOnly(e.target.checked)}
+                        />
+                        <span>Overnight only</span>
+                    </label>
+                </div>
+
                 {loading && <p className="small-text">Loading spots…</p>}
             </header>
 
@@ -341,6 +433,7 @@ function App() {
                             zoom={4}
                             scrollWheelZoom
                             className="map"
+                            ref={mapRef}
                         >
                             <TileLayer
                                 attribution="&copy; OpenStreetMap contributors"
@@ -349,7 +442,7 @@ function App() {
 
                             <AddSpotOnClick active={adding} onMapClick={handleMapClick} />
 
-                            {spots.map((spot) => (
+                            {filteredSpots.map((spot) => (
                                 <Marker
                                     key={spot.id}
                                     position={[spot.lat, spot.lng]}
@@ -395,6 +488,12 @@ function App() {
                             {adding && pendingLocation && (
                                 <Marker position={[pendingLocation.lat, pendingLocation.lng]}>
                                     <Popup>New spot location (not saved yet)</Popup>
+                                </Marker>
+                            )}
+
+                            {userLocation && (
+                                <Marker position={[userLocation.lat, userLocation.lng]}>
+                                    <Popup>You are here</Popup>
                                 </Marker>
                             )}
                         </MapContainer>
@@ -604,21 +703,32 @@ function App() {
                                 </span>
                             </div>
 
-                            {selectedSpot.photo_urls && selectedSpot.photo_urls.length > 0 && (
-                                <div className="photo-strip">
-                                    {selectedSpot.photo_urls.slice(0, 4).map((url, idx) => (
-                                        <img
-                                            key={idx}
-                                            src={url}
-                                            alt={`${selectedSpot.name} photo ${idx + 1}`}
-                                            loading="lazy"
-                                            onClick={() =>
-                                                setActivePhoto({ url, name: selectedSpot.name })
-                                            }
-                                        />
-                                    ))}
-                                </div>
-                            )}
+                            {selectedSpot.photo_urls &&
+                                selectedSpot.photo_urls.length > 0 && (
+                                    <div className="photo-strip">
+                                        {selectedSpot.photo_urls.slice(0, 4).map((url, idx) => (
+                                            <img
+                                                key={idx}
+                                                src={url}
+                                                alt={`${selectedSpot.name} photo ${idx + 1}`}
+                                                loading="lazy"
+                                                onClick={() =>
+                                                    setActivePhoto({ url, name: selectedSpot.name })
+                                                }
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+
+                            <div className="spot-actions">
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    onClick={() => openSpotInMaps(selectedSpot)}
+                                >
+                                    Open in Maps
+                                </button>
+                            </div>
 
                             <div className="reviews-block">
                                 <h3 className="reviews-title">Reviews</h3>
