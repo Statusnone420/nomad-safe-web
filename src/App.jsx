@@ -38,6 +38,18 @@ function clamp(num, min, max) {
     return Math.min(Math.max(num, min), max);
 }
 
+// Map from spot_type -> emoji/icon
+function getSpotTypeIcon(type) {
+    const t = (type || "other").toLowerCase();
+    if (t === "forest_road") return "🌲";
+    if (t === "walmart") return "🛒";
+    if (t === "rest_area") return "🛣️";
+    if (t === "city_stealth") return "🏙️";
+    if (t === "campground") return "🏕️";
+    if (t === "scenic_view") return "🌄";
+    return "📍";
+}
+
 const initialForm = {
     name: "",
     description: "",
@@ -46,6 +58,7 @@ const initialForm = {
     cellSignal: 3,
     noiseLevel: "quiet",
     safetyRating: 4,
+    spotType: "forest_road",
 };
 
 function App() {
@@ -57,6 +70,7 @@ function App() {
     const [saving, setSaving] = useState(false);
     const [status, setStatus] = useState("Connecting to Supabase…");
     const [errorMsg, setErrorMsg] = useState("");
+    const [darkMode, setDarkMode] = useState(false);
 
     const center = [39.5, -98.35]; // Center of US
 
@@ -141,6 +155,7 @@ function App() {
             5
         );
         const noise_level = form.noiseLevel || "unknown";
+        const spot_type = form.spotType || "other";
 
         setSaving(true);
 
@@ -156,6 +171,7 @@ function App() {
                 cell_signal,
                 noise_level,
                 safety_rating,
+                spot_type,
             })
             .select()
             .single();
@@ -172,14 +188,31 @@ function App() {
         cancelAdding();
     }
 
+    const appClassName = darkMode ? "app dark" : "app";
+
     return (
-        <div className="app">
+        <div className={appClassName}>
             <header className="app-header">
-                <h1>Nomad Safe Spots</h1>
-                <p>
-                    Community map of safe places to park and rest. Tap a pin to see
-                    details.
-                </p>
+                <div className="brand-row">
+                    <div>
+                        <h1>Nomad Safe Spots</h1>
+                        <p className="subtitle">
+                            Community-driven safe parking map – free, no paywalls.
+                        </p>
+                        <p className="brand-by">
+                            Built with ❤️ by <span className="brand-name">Statusnone</span>
+                        </p>
+                    </div>
+                    <div className="header-controls">
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => setDarkMode((d) => !d)}
+                        >
+                            {darkMode ? "☀️ Light" : "🌙 Dark"}
+                        </button>
+                    </div>
+                </div>
 
                 <p className="status-text">{status}</p>
 
@@ -203,7 +236,9 @@ function App() {
                         {spots.map((spot) => (
                             <Marker key={spot.id} position={[spot.lat, spot.lng]}>
                                 <Popup>
-                                    <strong>{spot.name}</strong>
+                                    <strong>
+                                        {getSpotTypeIcon(spot.spot_type)} {spot.name}
+                                    </strong>
                                     <br />
                                     {spot.description}
                                     <br />
@@ -213,6 +248,14 @@ function App() {
                                     <br />
                                     <br />
                                     <div className="popup-meta">
+                                        <div>
+                                            Type:{" "}
+                                            {(
+                                                spot.spot_type || "other"
+                                            )
+                                                .replace("_", " ")
+                                                .replace(/\b\w/g, (c) => c.toUpperCase())}
+                                        </div>
                                         <div>
                                             Overnight allowed:{" "}
                                             {spot.overnight_allowed ? "Yes" : "No / unknown"}
@@ -230,10 +273,7 @@ function App() {
                         ))}
 
                         {adding && pendingLocation && (
-                            <Marker
-                                position={[pendingLocation.lat, pendingLocation.lng]}
-                            // same icon; this just shows "pending" location
-                            >
+                            <Marker position={[pendingLocation.lat, pendingLocation.lng]}>
                                 <Popup>New spot location (not saved yet)</Popup>
                             </Marker>
                         )}
@@ -287,6 +327,23 @@ function App() {
                                         placeholder="What should people know about this spot?"
                                         rows={3}
                                     />
+                                </div>
+
+                                <div className="form-group">
+                                    <label>Spot type</label>
+                                    <select
+                                        name="spotType"
+                                        value={form.spotType}
+                                        onChange={handleInputChange}
+                                    >
+                                        <option value="forest_road">Forest road / BLM</option>
+                                        <option value="campground">Campground</option>
+                                        <option value="walmart">Walmart / big box lot</option>
+                                        <option value="rest_area">Highway rest area</option>
+                                        <option value="city_stealth">City stealth parking</option>
+                                        <option value="scenic_view">Scenic view / overlook</option>
+                                        <option value="other">Other / misc</option>
+                                    </select>
                                 </div>
 
                                 <div className="form-row">
