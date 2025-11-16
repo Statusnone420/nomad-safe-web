@@ -96,6 +96,18 @@ function formatNoiseLevel(noise) {
     }
 }
 
+// Chip definitions for filter row
+const FILTER_CHIPS = [
+    { key: "forest_road", label: "🌲 Forest" },
+    { key: "campground", label: "🏕 Campground" },
+    { key: "walmart", label: "🛒 Store" },
+    { key: "rest_area", label: "🛣 Rest area" },
+    { key: "city_stealth", label: "🏙 Stealth" },
+    { key: "truck_stop", label: "⛽ Truck stop" },
+    { key: "scenic_view", label: "🌄 Scenic" },
+    { key: "other", label: "📍 Other" },
+];
+
 const initialSpotForm = {
     name: "",
     description: "",
@@ -146,6 +158,9 @@ function App() {
     const [filterType, setFilterType] = useState("any");
     const [filterOvernightOnly, setFilterOvernightOnly] = useState(false);
     const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
+
+    // Map layer: "streets" | "satellite"
+    const [mapLayer, setMapLayer] = useState("streets");
 
     // Favorites (local)
     const [favoriteIds, setFavoriteIds] = useState(() => {
@@ -757,6 +772,28 @@ function App() {
                     </button>
                 </div>
 
+                {/* Emoji filter chips */}
+                <div className="chip-filter-row">
+                    {FILTER_CHIPS.map(({ key, label }) => {
+                        const isActive = filterType === key;
+                        return (
+                            <button
+                                key={key}
+                                type="button"
+                                className={`filter-chip chip-pill ${isActive ? "filter-chip--active" : ""
+                                    }`}
+                                onClick={() =>
+                                    setFilterType((prev) =>
+                                        prev === key ? "any" : key
+                                    )
+                                }
+                            >
+                                {label}
+                            </button>
+                        );
+                    })}
+                </div>
+
                 {/* Filters */}
                 <div className="filters-row">
                     <div className="filters-group">
@@ -784,6 +821,7 @@ function App() {
                             <option value="scenic_view">
                                 Scenic viewpoint / overlook
                             </option>
+                            <option value="other">Other / something else</option>
                         </select>
                     </div>
 
@@ -808,6 +846,32 @@ function App() {
                     </button>
                 </div>
 
+                {/* Map / Satellite toggle – moved into header so it doesn't cover the map */}
+                <div className="map-layer-toggle-row">
+                    <div className="map-layer-toggle">
+                        <button
+                            type="button"
+                            className={`btn-ghost ${mapLayer === "streets"
+                                    ? "btn-ghost--active"
+                                    : ""
+                                }`}
+                            onClick={() => setMapLayer("streets")}
+                        >
+                            🗺 Map
+                        </button>
+                        <button
+                            type="button"
+                            className={`btn-ghost ${mapLayer === "satellite"
+                                    ? "btn-ghost--active"
+                                    : ""
+                                }`}
+                            onClick={() => setMapLayer("satellite")}
+                        >
+                            🛰 Satellite
+                        </button>
+                    </div>
+                </div>
+
                 {loading && <p className="small-text">Loading spots…</p>}
             </header>
 
@@ -822,8 +886,16 @@ function App() {
                             ref={mapRef}
                         >
                             <TileLayer
-                                attribution="&copy; OpenStreetMap contributors"
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                attribution={
+                                    mapLayer === "streets"
+                                        ? "&copy; OpenStreetMap contributors"
+                                        : "Imagery &copy; Esri"
+                                }
+                                url={
+                                    mapLayer === "streets"
+                                        ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                        : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                                }
                             />
 
                             <AddSpotOnClick
@@ -943,10 +1015,9 @@ function App() {
                                 return (
                                     <button
                                         key={spot.id}
-                                        className={`spot-list-item ${selectedSpotId ===
-                                            spot.id
-                                            ? "spot-list-item--active"
-                                            : ""
+                                        className={`spot-list-item ${selectedSpotId === spot.id
+                                                ? "spot-list-item--active"
+                                                : ""
                                             }`}
                                         onClick={() => {
                                             setSelectedSpotId(spot.id);
@@ -1294,11 +1365,9 @@ function App() {
                                         </h2>
                                         <button
                                             type="button"
-                                            className={`fav-btn ${isFavorite(
-                                                selectedSpot.id
-                                            )
-                                                ? "fav-btn--active"
-                                                : ""
+                                            className={`fav-btn ${isFavorite(selectedSpot.id)
+                                                    ? "fav-btn--active"
+                                                    : ""
                                                 }`}
                                             onClick={() =>
                                                 toggleFavorite(selectedSpot.id)
