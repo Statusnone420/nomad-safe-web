@@ -50,30 +50,17 @@ function haversineDistanceKm(a, b) {
     const sinDLat = Math.sin(dLat / 2);
     const sinDLng = Math.sin(dLng / 2);
 
-    const h =
+    const aa =
         sinDLat * sinDLat +
         Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+    const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
 
-    const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
     return R * c;
 }
 
-// Map from spot_type -> emoji/icon
-function getSpotTypeIcon(type) {
-    const t = (type || "other").toLowerCase();
-    if (t === "forest_road") return "🌲";
-    if (t === "walmart") return "🛒";
-    if (t === "rest_area") return "🛣️";
-    if (t === "city_stealth") return "🏙️";
-    if (t === "campground") return "🏕️";
-    if (t === "scenic_view") return "🌄";
-    if (t === "truck_stop") return "⛽";
-    return "📍";
-}
-
-function formatNoiseLevel(noise) {
-    const t = (noise || "unknown").toLowerCase();
-    switch (t) {
+function formatNoiseLevel(level) {
+    if (!level) return "Unknown";
+    switch (level) {
         case "silent":
             return "Silent";
         case "very_quiet":
@@ -87,25 +74,40 @@ function formatNoiseLevel(noise) {
             return "Loud but steady";
         case "party":
             return "Party / unpredictable";
-        case "medium":
+        case "medium": // legacy
             return "Medium";
         case "noisy":
             return "Noisy";
         default:
-            return "Unknown";
+            return level;
     }
 }
 
-// Chip definitions for filter row
+function getSpotTypeIcon(type) {
+    switch (type) {
+        case "forest_road":
+            return "🌲";
+        case "campground":
+            return "🏕️";
+        case "store":
+            return "🛒";
+        case "rest_area":
+            return "🛣️";
+        case "trailhead":
+            return "🥾";
+        case "other":
+        default:
+            return "📍";
+    }
+}
+
 const FILTER_CHIPS = [
+    { key: "any", label: "Any" },
     { key: "forest_road", label: "🌲 Forest" },
-    { key: "campground", label: "🏕 Campground" },
-    { key: "walmart", label: "🛒 Store" },
-    { key: "rest_area", label: "🛣 Rest area" },
-    { key: "city_stealth", label: "🏙 Stealth" },
-    { key: "truck_stop", label: "⛽ Truck stop" },
-    { key: "scenic_view", label: "🌄 Scenic" },
-    { key: "other", label: "📍 Other" },
+    { key: "campground", label: "🏕️ Campground" },
+    { key: "store", label: "🛒 Store" },
+    { key: "rest_area", label: "🛣️ Rest area" },
+    { key: "trailhead", label: "🥾 Trailhead" },
 ];
 
 const initialSpotForm = {
@@ -114,8 +116,8 @@ const initialSpotForm = {
     overnightAllowed: false,
     hasBathroom: false,
     cellSignal: 3,
-    noiseLevel: "quiet",
     safetyRating: 4,
+    noiseLevel: "quiet",
     spotType: "forest_road",
     photoUrls: "",
 };
@@ -142,9 +144,6 @@ function App() {
 
     // Reviews
     const [reviewForm, setReviewForm] = useState(initialReviewForm);
-
-    // Global / UI state
-    const [loading, setLoading] = useState(true);
     const [savingSpot, setSavingSpot] = useState(false);
     const [savingReview, setSavingReview] = useState(false);
     const [status, setStatus] = useState("Connecting to Supabase…");
@@ -159,8 +158,8 @@ function App() {
     const [filterOvernightOnly, setFilterOvernightOnly] = useState(false);
     const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
 
-    // Map layer: "streets" | "satellite"
-    const [mapLayer, setMapLayer] = useState("streets");
+    // Map layer
+    const [mapLayer, setMapLayer] = useState("satellite");
 
     // Favorites (local)
     const [favoriteIds, setFavoriteIds] = useState(() => {
@@ -177,6 +176,11 @@ function App() {
 
     // Auth
     const [session, setSession] = useState(null);
+    const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
+
+    const isMobileViewport =
+        typeof window !== "undefined" && window.innerWidth <= 768;
+
     const [authEmail, setAuthEmail] = useState("");
     const [authLoading, setAuthLoading] = useState(false);
     const [authError, setAuthError] = useState("");
@@ -184,9 +188,6 @@ function App() {
     // Map ref
     const mapRef = useRef(null);
     const center = [39.5, -98.35]; // Center of US
-
-    // Mobile / drawer: just "open" or "closed", CSS handles mobile vs desktop
-    const [isSheetOpen, setIsSheetOpen] = useState(false);
 
     /* ---------- EFFECTS ---------- */
 
@@ -198,34 +199,57 @@ function App() {
             const [spotsRes, reviewsRes] = await Promise.all([
                 supabase
                     .from("spots")
-                    .select("*")
-                    .order("id", { ascending: true }),
+                    .select(
+                        "id, name, description, lat, lng, overnight_allowed, has_bathroom, cell_signal, noise_level, safety_rating, spot_type, created_at, photo_urls"
+                    )
+                    .order("created_at", { ascending: false }),
                 supabase
                     .from("reviews")
-                    .select("*")
+                    .select(
+                        "id, spot_id, rating, comment, nickname, created_at"
+                    )
                     .order("created_at", { ascending: false }),
             ]);
 
             if (spotsRes.error) {
-                console.error("Error loading spots:", spotsRes.error);
-                setStatus("Error loading spots: " + spotsRes.error.message);
-                alert("Error loading spots: " + spotsRes.error.message);
-            } else {
-                const normalizedSpots = (spotsRes.data || []).map((spot) => {
-                    let photo_urls = spot.photo_urls;
+                console.error(spotsRes.error);
+                setStatus("Error loading spots");
+                setErrorMsg(spotsRes.error.message);
+                return;
+            }
 
+            if (reviewsRes.error) {
+                console.error(reviewsRes.error);
+                setStatus("Error loading reviews");
+                setErrorMsg(reviewsRes.error.message);
+                return;
+            }
+
+            let loadedSpots = spotsRes.data ?? [];
+
+            // Normalize photo_urls
+            loadedSpots = loadedSpots.map((spot) => {
+                let { photo_urls } = spot;
+                if (!photo_urls) {
+                    photo_urls = [];
+                } else {
                     if (Array.isArray(photo_urls)) {
-                        // ok
+                        // ok as-is
                     } else if (
                         typeof photo_urls === "string" &&
                         photo_urls.trim().length > 0
                     ) {
+                        // handle legacy comma-separated string
                         try {
+                            // if it's actually JSON, parse it; otherwise treat as CSV
                             const maybeJson = JSON.parse(photo_urls);
                             if (Array.isArray(maybeJson)) {
                                 photo_urls = maybeJson;
                             } else {
-                                photo_urls = [photo_urls];
+                                photo_urls = photo_urls
+                                    .split(",")
+                                    .map((s) => s.trim())
+                                    .filter(Boolean);
                             }
                         } catch {
                             photo_urls = photo_urls
@@ -236,127 +260,101 @@ function App() {
                     } else {
                         photo_urls = [];
                     }
+                }
+                return { ...spot, photo_urls };
+            });
 
-                    return {
-                        ...spot,
-                        photo_urls,
-                    };
-                });
+            setSpots(loadedSpots);
+            setReviews(reviewsRes.data ?? []);
 
-                setSpots(normalizedSpots);
-                setStatus(
-                    `Connected. Spots: ${normalizedSpots.length || 0}, Reviews: ${reviewsRes.data?.length || 0
-                    }`
-                );
-            }
-
-            if (reviewsRes.error) {
-                console.error("Error loading reviews:", reviewsRes.error);
-            } else {
-                setReviews(reviewsRes.data || []);
-            }
-
-            setLoading(false);
+            setStatus("Loaded spots & reviews. Tap the map to explore.");
+            setErrorMsg("");
         }
 
         loadData();
     }, []);
 
-    // Load auth session + subscribe
+    // Auth session
     useEffect(() => {
-        let mounted = true;
-
-        async function getInitialSession() {
-            const {
-                data: { session },
-            } = await supabase.auth.getSession();
-            if (mounted) setSession(session ?? null);
+        async function getSession() {
+            const { data, error } = await supabase.auth.getSession();
+            if (error) {
+                console.error(error);
+                return;
+            }
+            setSession(data.session ?? null);
         }
 
-        getInitialSession();
+        getSession();
 
         const {
             data: { subscription },
         } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session ?? null);
+            setSession(session);
         });
 
-        return () => {
-            mounted = false;
-            subscription.unsubscribe();
-        };
+        return () => subscription.unsubscribe();
+    }, []);
+
+    // Get user location
+    useEffect(() => {
+        if (!navigator.geolocation) return;
+
+        const watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                setUserLocation({
+                    lat: pos.coords.latitude,
+                    lng: pos.coords.longitude,
+                });
+            },
+            (err) => {
+                console.warn("Geolocation error:", err);
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 30_000,
+                timeout: 20_000,
+            }
+        );
+
+        return () => navigator.geolocation.clearWatch(watchId);
     }, []);
 
     // Persist favorites
     useEffect(() => {
         try {
+            const arr = Array.from(favoriteIds);
             window.localStorage.setItem(
                 "nomad_safe_spots_favorites",
-                JSON.stringify(Array.from(favoriteIds))
+                JSON.stringify(arr)
             );
-        } catch {
-            // ignore
+        } catch (err) {
+            console.warn("Error saving favorites:", err);
         }
     }, [favoriteIds]);
 
-    /* ---------- MEMOS ---------- */
+    /* ---------- DERIVED DATA ---------- */
 
-    const selectedSpot = useMemo(
-        () => spots.find((s) => s.id === selectedSpotId) || null,
-        [spots, selectedSpotId]
-    );
-
-    const selectedSpotReviews = useMemo(
-        () =>
-            selectedSpotId
-                ? reviews.filter((r) => r.spot_id === selectedSpotId)
-                : [],
-        [reviews, selectedSpotId]
-    );
-
-    const selectedSpotAverageRating = useMemo(() => {
-        if (!selectedSpotReviews.length) return null;
-        const sum = selectedSpotReviews.reduce(
-            (acc, r) => acc + (r.rating || 0),
-            0
-        );
-        return sum / selectedSpotReviews.length;
-    }, [selectedSpotReviews]);
-
-    const filteredSpots = useMemo(() => {
-        let list = spots;
-
-        if (filterType !== "any") {
-            list = list.filter(
-                (s) => (s.spot_type || "other").toLowerCase() === filterType
-            );
+    const reviewsBySpotId = useMemo(() => {
+        const map = new Map();
+        for (const review of reviews) {
+            if (!review.spot_id) continue;
+            if (!map.has(review.spot_id)) map.set(review.spot_id, []);
+            map.get(review.spot_id).push(review);
         }
+        return map;
+    }, [reviews]);
 
-        if (filterOvernightOnly) {
-            list = list.filter((s) => !!s.overnight_allowed);
-        }
-
-        if (filterFavoritesOnly) {
-            list = list.filter((s) => favoriteIds.has(s.id));
-        }
-
-        return list;
-    }, [spots, filterType, filterOvernightOnly, filterFavoritesOnly, favoriteIds]);
-
-    const spotsForList = useMemo(() => {
-        return filteredSpots
+    const spotsWithStats = useMemo(() => {
+        return (spots ?? [])
             .map((spot) => {
-                const spotReviews = reviews.filter(
-                    (r) => r.spot_id === spot.id
-                );
-                const reviewCount = spotReviews.length;
+                const revs = reviewsBySpotId.get(spot.id) ?? [];
                 const avgRating =
-                    reviewCount > 0
-                        ? spotReviews.reduce(
-                            (sum, r) => sum + (r.rating || 0),
-                            0
-                        ) / reviewCount
+                    revs.length > 0
+                        ? revs.reduce((sum, r) => sum + (r.rating ?? 0), 0) /
+                        revs.length
                         : null;
+                const reviewCount = revs.length;
 
                 const distanceKm = userLocation
                     ? haversineDistanceKm(
@@ -389,23 +387,42 @@ function App() {
 
                 return (a.name || "").localeCompare(b.name || "");
             });
-    }, [filteredSpots, userLocation, favoriteIds, reviews]);
+    }, [spots, reviewsBySpotId, userLocation, favoriteIds]);
 
-    /* ---------- HELPERS ---------- */
-
-    const toggleFavorite = (spotId) => {
-        setFavoriteIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(spotId)) {
-                next.delete(spotId);
-            } else {
-                next.add(spotId);
+    const filteredSpots = useMemo(() => {
+        return spotsWithStats.filter((spot) => {
+            if (filterType !== "any" && spot.spot_type !== filterType) {
+                return false;
             }
-            return next;
+            if (filterOvernightOnly && !spot.overnight_allowed) {
+                return false;
+            }
+            if (filterFavoritesOnly && !favoriteIds.has(spot.id)) {
+                return false;
+            }
+            return true;
         });
-    };
+    }, [
+        spotsWithStats,
+        filterType,
+        filterOvernightOnly,
+        filterFavoritesOnly,
+        favoriteIds,
+    ]);
+
+    const selectedSpot = useMemo(
+        () => spotsWithStats.find((s) => s.id === selectedSpotId) || null,
+        [spotsWithStats, selectedSpotId]
+    );
+
+    const selectedSpotReviews = useMemo(
+        () => reviewsBySpotId.get(selectedSpotId) ?? [],
+        [reviewsBySpotId, selectedSpotId]
+    );
 
     const isFavorite = (spotId) => favoriteIds.has(spotId);
+
+    /* ---------- HANDLERS ---------- */
 
     function startAdding() {
         setAdding(true);
@@ -414,7 +431,10 @@ function App() {
         setSpotForm(initialSpotForm);
         setSpotPhotoFiles([]);
         setErrorMsg("");
-        setIsSheetOpen(true); // open drawer (on mobile) or just keep sidebar visible
+        // On mobile, collapse the drawer so it's easy to tap the map first
+        if (isMobileViewport) {
+            setIsMobileSheetOpen(false);
+        }
     }
 
     function cancelAddOrEdit() {
@@ -424,13 +444,16 @@ function App() {
         setSpotForm(initialSpotForm);
         setSpotPhotoFiles([]);
         setErrorMsg("");
-        setIsSheetOpen(false);
     }
 
     function handleMapClick(lat, lng) {
         if (!adding) return;
         setPendingLocation({ lat, lng });
         setErrorMsg("");
+        // When a location is picked on mobile, spring the drawer back open
+        if (isMobileViewport) {
+            setIsMobileSheetOpen(true);
+        }
     }
 
     function handleSpotInputChange(e) {
@@ -464,11 +487,14 @@ function App() {
         }
 
         if (!spotForm.name.trim()) {
-            setErrorMsg("Name is required.");
+            setErrorMsg("Please give this spot a name.");
             return;
         }
 
-        const { lat, lng } = pendingLocation;
+        setSavingSpot(true);
+
+        const lat = pendingLocation.lat;
+        const lng = pendingLocation.lng;
         const cell_signal = clamp(
             parseInt(spotForm.cellSignal, 10) || 0,
             0,
@@ -476,40 +502,39 @@ function App() {
         );
         const safety_rating = clamp(
             parseInt(spotForm.safetyRating, 10) || 0,
-            0,
+            1,
             5
         );
-        const noise_level = spotForm.noiseLevel || "unknown";
-        const spot_type = spotForm.spotType || "other";
 
         let photo_urls = [];
-        if (spotForm.photoUrls.trim()) {
+        // parse any manual URLs typed in
+        if (spotForm.photoUrls) {
             photo_urls = spotForm.photoUrls
                 .split(",")
-                .map((u) => u.trim())
+                .map((s) => s.trim())
                 .filter(Boolean);
         }
 
+        // upload any local files
         let uploadedUrls = [];
         if (spotPhotoFiles.length > 0) {
             setUploadingPhotos(true);
 
-            const userId = session?.user?.id || "anon";
-
-            for (let i = 0; i < spotPhotoFiles.length; i++) {
-                const file = spotPhotoFiles[i];
-                const ext = file.name.split(".").pop() || "jpg";
-                const path = `${userId}/${Date.now()}-${i}.${ext}`;
+            for (const file of spotPhotoFiles) {
+                const ext = file.name.split(".").pop();
+                const fileName = `${Date.now()}-${Math.random()
+                    .toString(36)
+                    .slice(2)}.${ext}`;
 
                 const { data, error } = await supabase.storage
                     .from("spot-photos")
-                    .upload(path, file, {
+                    .upload(fileName, file, {
                         cacheControl: "3600",
                         upsert: false,
                     });
 
                 if (error) {
-                    console.error("Photo upload error:", error);
+                    console.error(error);
                     setErrorMsg(
                         "Failed to upload one of the photos: " + error.message
                     );
@@ -541,59 +566,59 @@ function App() {
             overnight_allowed: spotForm.overnightAllowed,
             has_bathroom: spotForm.hasBathroom,
             cell_signal,
-            noise_level,
             safety_rating,
-            spot_type,
+            noise_level: spotForm.noiseLevel,
+            spot_type: spotForm.spotType,
             photo_urls: allPhotoUrls,
         };
 
-        setSavingSpot(true);
+        try {
+            let result;
+            if (editingSpotId) {
+                result = await supabase
+                    .from("spots")
+                    .update(payload)
+                    .eq("id", editingSpotId)
+                    .select()
+                    .single();
+            } else {
+                result = await supabase
+                    .from("spots")
+                    .insert(payload)
+                    .select()
+                    .single();
+            }
 
-        let result;
-        if (editingSpotId) {
-            result = await supabase
-                .from("spots")
-                .update(payload)
-                .eq("id", editingSpotId)
-                .select()
-                .single();
-        } else {
-            result = await supabase
-                .from("spots")
-                .insert({
-                    ...payload,
-                    created_by: session?.user?.id || null,
-                })
-                .select()
-                .single();
-        }
+            if (result.error) {
+                console.error(result.error);
+                setErrorMsg(result.error.message);
+                return;
+            }
 
-        setSavingSpot(false);
+            const savedSpot = result.data;
+            setSpots((prev) => {
+                const idx = prev.findIndex((s) => s.id === savedSpot.id);
+                if (idx === -1) return [savedSpot, ...prev];
+                const copy = [...prev];
+                copy[idx] = savedSpot;
+                return copy;
+            });
 
-        if (result.error) {
-            console.error("Error saving spot:", result.error);
-            setErrorMsg("Failed to save spot: " + result.error.message);
-            return;
-        }
-
-        const savedSpot = result.data;
-
-        if (editingSpotId) {
-            setSpots((prev) =>
-                prev.map((s) => (s.id === savedSpot.id ? savedSpot : s))
+            setAdding(false);
+            setEditingSpotId(null);
+            setPendingLocation(null);
+            setSpotForm(initialSpotForm);
+            setSpotPhotoFiles([]);
+            setErrorMsg("");
+            setStatus(
+                editingSpotId ? "Spot updated successfully." : "Spot added!"
             );
-        } else {
-            setSpots((prev) => [...prev, savedSpot]);
+        } catch (err) {
+            console.error(err);
+            setErrorMsg(err.message || "Error saving spot.");
+        } finally {
+            setSavingSpot(false);
         }
-
-        setSelectedSpotId(savedSpot.id);
-        setIsSheetOpen(true);
-        setAdding(false);
-        setEditingSpotId(null);
-        setPendingLocation(null);
-        setSpotForm(initialSpotForm);
-        setSpotPhotoFiles([]);
-        setErrorMsg("");
     }
 
     async function handleAddReview(e) {
@@ -616,34 +641,41 @@ function App() {
             return;
         }
 
-        setSavingReview(true);
+        const payload = {
+            spot_id: selectedSpot.id,
+            rating,
+            comment: reviewForm.comment.trim(),
+            nickname: reviewForm.nickname.trim() || null,
+        };
 
-        const { data, error } = await supabase
-            .from("reviews")
-            .insert({
-                spot_id: selectedSpot.id,
-                rating,
-                comment: reviewForm.comment.trim(),
-                nickname: reviewForm.nickname.trim() || null,
-            })
-            .select()
-            .single();
+        try {
+            setSavingReview(true);
+            const { data, error } = await supabase
+                .from("reviews")
+                .insert(payload)
+                .select()
+                .single();
 
-        setSavingReview(false);
+            if (error) {
+                console.error(error);
+                setReviewError(error.message);
+                return;
+            }
 
-        if (error) {
-            console.error("Error saving review:", error);
-            setReviewError("Failed to save review: " + error.message);
-            return;
+            setReviews((prev) => [data, ...prev]);
+            setReviewForm(initialReviewForm);
+        } catch (err) {
+            console.error(err);
+            setReviewError(err.message || "Error saving review.");
+        } finally {
+            setSavingReview(false);
         }
-
-        setReviews((prev) => [data, ...prev]);
-        setReviewForm(initialReviewForm);
     }
 
-    function handleLocateMe() {
+    async function handleLocateMe() {
+        if (!mapRef.current) return;
         if (!navigator.geolocation) {
-            setStatus("Geolocation is not supported in this browser.");
+            setStatus("Geolocation is not supported by your browser.");
             return;
         }
 
@@ -652,18 +684,23 @@ function App() {
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 const { latitude, longitude } = pos.coords;
-                const loc = { lat: latitude, lng: longitude };
-                setUserLocation(loc);
-                if (mapRef.current) {
-                    mapRef.current.setView([latitude, longitude], 9);
-                }
-                setStatus((prev) =>
-                    prev.startsWith("Finding") ? "Location updated." : prev
-                );
+                setUserLocation({ lat: latitude, lng: longitude });
+
+                const map = mapRef.current;
+                map.setView([latitude, longitude], 11, {
+                    animate: true,
+                });
+
+                setStatus("Centered on your location.");
             },
             (err) => {
-                console.error("Geolocation error:", err);
-                setStatus("Could not get location: " + err.message);
+                console.error(err);
+                setStatus("Unable to get your location.");
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 30_000,
+                timeout: 20_000,
             }
         );
     }
@@ -677,47 +714,58 @@ function App() {
     async function handleLogin(e) {
         e.preventDefault();
         setAuthError("");
-
         if (!authEmail.trim()) {
-            setAuthError("Enter an email to sign in.");
+            setAuthError("Please enter an email.");
             return;
         }
 
         setAuthLoading(true);
+        try {
+            const { error } = await supabase.auth.signInWithOtp({
+                email: authEmail.trim(),
+                options: {
+                    emailRedirectTo: window.location.href,
+                },
+            });
 
-        const { error } = await supabase.auth.signInWithOtp({
-            email: authEmail.trim(),
-            options: {
-                emailRedirectTo: window.location.origin,
-            },
-        });
+            if (error) {
+                console.error(error);
+                setAuthError(error.message);
+                return;
+            }
 
-        setAuthLoading(false);
-
-        if (error) {
-            console.error("Auth error:", error);
-            setAuthError("Login error: " + error.message);
-            return;
+            setStatus("Check your email for a magic login link.");
+        } catch (err) {
+            console.error(err);
+            setAuthError(err.message || "Error sending magic link.");
+        } finally {
+            setAuthLoading(false);
         }
-
-        setAuthError(
-            "Check your email for a magic link to finish sign-in."
-        );
     }
 
     async function handleLogout() {
-        await supabase.auth.signOut();
-        setSession(null);
+        try {
+            await supabase.auth.signOut();
+            setSession(null);
+        } catch (err) {
+            console.error(err);
+        }
     }
 
-    function beginEditingSpot(spot) {
+    function toggleFavorite(spotId) {
+        setFavoriteIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(spotId)) next.delete(spotId);
+            else next.add(spotId);
+            return next;
+        });
+    }
+
+    function startEditingSpot(spot) {
         if (!spot) return;
         setAdding(true);
         setEditingSpotId(spot.id);
         setPendingLocation({ lat: spot.lat, lng: spot.lng });
-        setErrorMsg("");
-        setSpotPhotoFiles([]);
-
         setSpotForm({
             name: spot.name || "",
             description: spot.description || "",
@@ -731,12 +779,10 @@ function App() {
                 ? spot.photo_urls.join(", ")
                 : "",
         });
-
-        setIsSheetOpen(true);
     }
 
-    const appClassName = `${darkMode ? "app glass dark" : "app glass"}${isSheetOpen ? " mobile-sheet-open" : ""
-        }`;
+    const appClassName = `${darkMode ? "app glass dark" : "app glass"
+        }${isMobileSheetOpen ? " mobile-sheet-open" : ""}`;
 
     return (
         <div className={appClassName}>
@@ -753,17 +799,19 @@ function App() {
                             <span className="brand-name">Statusnone</span>
                         </p>
                     </div>
+
                     <div className="header-controls">
                         <button
-                            type="button"
                             className="btn-ghost"
+                            type="button"
                             onClick={handleLocateMe}
                         >
                             📍 My location
                         </button>
                         <button
+                            className={`btn-ghost ${!darkMode ? "btn-ghost--active" : ""
+                                }`}
                             type="button"
-                            className="btn-ghost"
                             onClick={() => setDarkMode((d) => !d)}
                         >
                             {darkMode ? "☀️ Light" : "🌙 Dark"}
@@ -789,46 +837,39 @@ function App() {
                                 type="button"
                                 className={`filter-chip chip-pill ${isActive ? "filter-chip--active" : ""
                                     }`}
-                                onClick={() =>
-                                    setFilterType((prev) =>
-                                        prev === key ? "any" : key
-                                    )
-                                }
+                                onClick={() => setFilterType(key)}
                             >
                                 {label}
                             </button>
                         );
                     })}
+                    <button
+                        type="button"
+                        className={`filter-chip chip-pill ${filterFavoritesOnly ? "filter-chip--active" : ""
+                            }`}
+                        onClick={() =>
+                            setFilterFavoritesOnly((prev) => !prev)
+                        }
+                    >
+                        ⭐ Favorites
+                    </button>
                 </div>
 
-                {/* Filters */}
+                {/* Filters row */}
                 <div className="filters-row">
                     <div className="filters-group">
-                        <label className="filters-label">Type</label>
+                        <span className="filters-label">Type</span>
                         <select
+                            className="filters-select"
                             value={filterType}
                             onChange={(e) => setFilterType(e.target.value)}
-                            className="filters-select"
                         >
                             <option value="any">Any</option>
-                            <option value="forest_road">
-                                Forest road / public land
-                            </option>
-                            <option value="campground">
-                                Campground / RV park
-                            </option>
-                            <option value="walmart">Store / plaza parking</option>
-                            <option value="rest_area">Highway rest area</option>
-                            <option value="city_stealth">
-                                City street / stealth
-                            </option>
-                            <option value="truck_stop">
-                                Truck stop / travel plaza
-                            </option>
-                            <option value="scenic_view">
-                                Scenic viewpoint / overlook
-                            </option>
-                            <option value="other">Other / something else</option>
+                            <option value="forest_road">Forest road</option>
+                            <option value="campground">Campground</option>
+                            <option value="store">Store</option>
+                            <option value="rest_area">Rest area</option>
+                            <option value="trailhead">Trailhead</option>
                         </select>
                     </div>
 
@@ -839,47 +880,36 @@ function App() {
                             onChange={(e) =>
                                 setFilterOvernightOnly(e.target.checked)
                             }
-                        />
-                        <span>Overnight only</span>
+                        />{" "}
+                        Overnight only
                     </label>
-
-                    <button
-                        type="button"
-                        className={`filter-chip ${filterFavoritesOnly ? "filter-chip--active" : ""
-                            }`}
-                        onClick={() => setFilterFavoritesOnly((prev) => !prev)}
-                    >
-                        ⭐ Favorites
-                    </button>
                 </div>
 
-                {/* Map / Satellite toggle */}
+                {/* Map layer toggle */}
                 <div className="map-layer-toggle-row">
                     <div className="map-layer-toggle">
                         <button
                             type="button"
-                            className={`btn-ghost ${mapLayer === "streets"
-                                    ? "btn-ghost--active"
-                                    : ""
-                                }`}
-                            onClick={() => setMapLayer("streets")}
-                        >
-                            🗺 Map
-                        </button>
-                        <button
-                            type="button"
-                            className={`btn-ghost ${mapLayer === "satellite"
-                                    ? "btn-ghost--active"
+                            className={`filter-chip chip-pill ${mapLayer === "satellite"
+                                    ? "filter-chip--active"
                                     : ""
                                 }`}
                             onClick={() => setMapLayer("satellite")}
                         >
                             🛰 Satellite
                         </button>
+                        <button
+                            type="button"
+                            className={`filter-chip chip-pill ${mapLayer === "streets"
+                                    ? "filter-chip--active"
+                                    : ""
+                                }`}
+                            onClick={() => setMapLayer("streets")}
+                        >
+                            🗺 Streets
+                        </button>
                     </div>
                 </div>
-
-                {loading && <p className="small-text">Loading spots…</p>}
             </header>
 
             <div className="main-content">
@@ -905,26 +935,12 @@ function App() {
                                 }
                             />
 
-                            <AddSpotOnClick
-                                active={adding}
-                                onMapClick={handleMapClick}
-                            />
-
                             {filteredSpots.map((spot) => (
                                 <Marker
                                     key={spot.id}
                                     position={[spot.lat, spot.lng]}
                                     eventHandlers={{
-                                        click: () => {
-                                            setSelectedSpotId(spot.id);
-                                            setIsSheetOpen(true);
-                                            if (mapRef.current) {
-                                                mapRef.current.setView(
-                                                    [spot.lat, spot.lng],
-                                                    14
-                                                );
-                                            }
-                                        },
+                                        click: () => setSelectedSpotId(spot.id),
                                     }}
                                 >
                                     <Popup>
@@ -943,39 +959,32 @@ function App() {
                                         <br />
                                         <div className="popup-meta">
                                             <div>
-                                                Type:{" "}
-                                                {(spot.spot_type || "other")
-                                                    .replace("_", " ")
-                                                    .replace(/\b\w/g, (c) =>
-                                                        c.toUpperCase()
-                                                    )}
-                                            </div>
-                                            <div>
-                                                Overnight allowed:{" "}
-                                                {spot.overnight_allowed
-                                                    ? "Yes"
-                                                    : "No / unknown"}
-                                            </div>
-                                            <div>
-                                                Bathrooms:{" "}
-                                                {spot.has_bathroom
-                                                    ? "Yes"
-                                                    : "No / nearby / ?"}
-                                            </div>
-                                            <div>
-                                                Cell: {spot.cell_signal ?? 0} / 5
-                                                bars
-                                            </div>
-                                            <div>
-                                                Noise:{" "}
-                                                {formatNoiseLevel(
-                                                    spot.noise_level
+                                                {spot.avgRating != null ? (
+                                                    <>
+                                                        ★{" "}
+                                                        {spot.avgRating.toFixed(
+                                                            1
+                                                        )}{" "}
+                                                        ({spot.reviewCount}{" "}
+                                                        reviews)
+                                                    </>
+                                                ) : (
+                                                    "No reviews yet"
                                                 )}
                                             </div>
-                                            <div>
-                                                Safety:{" "}
-                                                {spot.safety_rating ?? 0} / 5
-                                            </div>
+                                            {spot.distanceKm != null && (
+                                                <div>
+                                                    Distance:{" "}
+                                                    {spot.distanceKm < 1
+                                                        ? `${Math.round(
+                                                            spot.distanceKm *
+                                                            1000
+                                                        )} m`
+                                                        : `${spot.distanceKm.toFixed(
+                                                            1
+                                                        )} km`}
+                                                </div>
+                                            )}
                                         </div>
                                     </Popup>
                                 </Marker>
@@ -1006,52 +1015,57 @@ function App() {
                                     <Popup>You are here</Popup>
                                 </Marker>
                             )}
+                            <AddSpotOnClick
+                                active={adding}
+                                onMapClick={handleMapClick}
+                            />
                         </MapContainer>
                     </div>
                 </div>
 
-                {/* Right-hand column / mobile drawer content */}
-                <div className="side-column">
-                    {/* Spot list panel */}
-                    <aside className="spot-list-panel">
+                <aside className="side-column">
+                    {/* SPOTS NEARBY CARD */}
+                    <div className="spot-list-panel">
                         <div className="spot-list-header">
-                            <h3 className="spot-list-title">Spots nearby</h3>
+                            <h2 className="spot-list-title">Spots nearby</h2>
                             <span className="spot-list-count">
-                                {spotsForList.length} result
-                                {spotsForList.length === 1 ? "" : "s"}
+                                {filteredSpots.length} results
                             </span>
                         </div>
-
                         <div className="spot-list-body">
-                            {spotsForList.map((spot) => {
-                                const typeLabel = (spot.spot_type || "other")
-                                    .replace("_", " ")
-                                    .replace(/\b\w/g, (c) => c.toUpperCase());
+                            {filteredSpots.length === 0 && (
+                                <p className="spot-list-empty">
+                                    No spots match your filters yet.
+                                </p>
+                            )}
+
+                            {filteredSpots.map((spot) => {
+                                const isSelected =
+                                    selectedSpotId === spot.id;
+                                const favorite = isFavorite(spot.id);
+                                const typeLabel =
+                                    FILTER_CHIPS.find(
+                                        (c) => c.key === spot.spot_type
+                                    )?.label || "Other";
 
                                 return (
                                     <button
                                         key={spot.id}
-                                        className={`spot-list-item ${selectedSpotId === spot.id
+                                        type="button"
+                                        className={`spot-list-item ${isSelected
                                                 ? "spot-list-item--active"
                                                 : ""
                                             }`}
-                                        onClick={() => {
-                                            setSelectedSpotId(spot.id);
-                                            if (mapRef.current) {
-                                                mapRef.current.setView(
-                                                    [spot.lat, spot.lng],
-                                                    14
-                                                );
-                                            }
-                                            setIsSheetOpen(true);
-                                        }}
+                                        onClick={() =>
+                                            setSelectedSpotId(spot.id)
+                                        }
                                     >
                                         <div className="spot-list-item-main">
                                             <div className="spot-list-item-title-row">
                                                 <span className="spot-list-item-name">
                                                     {spot.name}
                                                 </span>
-                                                {favoriteIds.has(spot.id) && (
+                                                {favorite && (
                                                     <span className="spot-list-item-fav">
                                                         ⭐
                                                     </span>
@@ -1095,46 +1109,69 @@ function App() {
                                     </button>
                                 );
                             })}
-
-                            {spotsForList.length === 0 && (
-                                <div className="spot-list-empty">
-                                    No spots match the filters yet.
-                                </div>
-                            )}
                         </div>
-                    </aside>
+                    </div>
 
-                    {/* Bottom sheet / sidebar */}
-                    <aside className="sheet">
-                        {/* ADD / EDIT SPOT */}
-                        {adding && (
-                            <div className="sheet-section">
-                                <h2 className="sheet-title">
-                                    {editingSpotId ? "Edit spot" : "Add a New Spot"}
-                                </h2>
+                    {/* ADD / EDIT SPOT CARD */}
+                    <div className="sheet">
+                        <div className="sheet-section">
+                            <div className="sheet-title-row">
+                                <div className="sheet-title-main">
+                                    <h2 className="sheet-title">
+                                        {editingSpotId
+                                            ? "Edit spot"
+                                            : "Add a new spot"}
+                                    </h2>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    onClick={startAdding}
+                                >
+                                    ➕ Start
+                                </button>
+                            </div>
 
-                                {!pendingLocation && (
-                                    <p className="small-text highlight">
-                                        Step 1: Tap on the map to pick a location.
-                                    </p>
-                                )}
+                            {!adding && (
+                                <p className="sheet-subtitle">
+                                    Tap <strong>Add Spot</strong>, then tap the
+                                    map where you stayed. Once the pin is
+                                    placed, fill in the details below.
+                                </p>
+                            )}
 
-                                {pendingLocation && (
-                                    <p className="small-text">
-                                        Location selected:
-                                        <br />
-                                        Lat: {pendingLocation.lat.toFixed(4)}, Lng:{" "}
-                                        {pendingLocation.lng.toFixed(4)}
-                                    </p>
-                                )}
+                            {adding && (
+                                <>
+                                    {!pendingLocation && (
+                                        <p className="small-text highlight">
+                                            Tap on the map to pick a location,
+                                            then fill in the details below.
+                                        </p>
+                                    )}
 
-                                {pendingLocation && (
+                                    {pendingLocation && (
+                                        <p className="small-text">
+                                            Location selected:
+                                            <br />
+                                            Lat:{" "}
+                                            {pendingLocation.lat.toFixed(4)},
+                                            Lng:{" "}
+                                            {pendingLocation.lng.toFixed(4)}
+                                        </p>
+                                    )}
+
+                                    {errorMsg && (
+                                        <p className="error-text">
+                                            {errorMsg}
+                                        </p>
+                                    )}
+
                                     <form
-                                        className="spot-form"
                                         onSubmit={handleSaveSpot}
+                                        className="spot-form"
                                     >
                                         <div className="form-group">
-                                            <label>Name *</label>
+                                            <label>Name</label>
                                             <input
                                                 type="text"
                                                 name="name"
@@ -1167,25 +1204,19 @@ function App() {
                                                     Forest road / public land
                                                 </option>
                                                 <option value="campground">
-                                                    Campground / RV park
+                                                    Campground
                                                 </option>
-                                                <option value="walmart">
-                                                    Store or plaza parking
+                                                <option value="store">
+                                                    Store / parking lot
                                                 </option>
                                                 <option value="rest_area">
-                                                    Highway rest area
+                                                    Rest area
                                                 </option>
-                                                <option value="city_stealth">
-                                                    City street (stealth)
-                                                </option>
-                                                <option value="truck_stop">
-                                                    Truck stop / travel plaza
-                                                </option>
-                                                <option value="scenic_view">
-                                                    Scenic viewpoint / overlook
+                                                <option value="trailhead">
+                                                    Trailhead
                                                 </option>
                                                 <option value="other">
-                                                    Other / something else
+                                                    Other
                                                 </option>
                                             </select>
                                         </div>
@@ -1213,7 +1244,9 @@ function App() {
                                             <label>
                                                 <input
                                                     type="checkbox"
-                                                    checked={spotForm.hasBathroom}
+                                                    checked={
+                                                        spotForm.hasBathroom
+                                                    }
                                                     onChange={(e) =>
                                                         setSpotForm((prev) => ({
                                                             ...prev,
@@ -1232,27 +1265,25 @@ function App() {
                                                 <select
                                                     name="cellSignal"
                                                     value={spotForm.cellSignal}
-                                                    onChange={
-                                                        handleSpotInputChange
-                                                    }
+                                                    onChange={handleSpotInputChange}
                                                 >
                                                     <option value="0">
                                                         0 – no service at all
                                                     </option>
                                                     <option value="1">
-                                                        1 – one bar / mostly useless
+                                                        1 – very weak
                                                     </option>
                                                     <option value="2">
-                                                        2 – spotty but can text
+                                                        2 – spotty
                                                     </option>
                                                     <option value="3">
-                                                        3 – decent LTE/5G
+                                                        3 – usable
                                                     </option>
                                                     <option value="4">
-                                                        4 – strong, hotspot OK
+                                                        4 – good
                                                     </option>
                                                     <option value="5">
-                                                        5 – stream all night
+                                                        5 – strong
                                                     </option>
                                                 </select>
                                             </div>
@@ -1261,27 +1292,23 @@ function App() {
                                                 <select
                                                     name="safetyRating"
                                                     value={spotForm.safetyRating}
-                                                    onChange={
-                                                        handleSpotInputChange
-                                                    }
+                                                    onChange={handleSpotInputChange}
                                                 >
-                                                    <option value="0">
-                                                        0 – would rather sleep at my in-laws
-                                                    </option>
                                                     <option value="1">
-                                                        1 – only if absolutely desperate
+                                                        1 – felt unsafe
                                                     </option>
                                                     <option value="2">
-                                                        2 – kinda sketchy but survivable
+                                                        2 – sketchy
                                                     </option>
                                                     <option value="3">
-                                                        3 – fine with some awareness
+                                                        3 – okay
                                                     </option>
                                                     <option value="4">
-                                                        4 – feels pretty safe overall
+                                                        4 – pretty safe overall
                                                     </option>
                                                     <option value="5">
-                                                        5 – would recommend to a friend
+                                                        5 – would recommend to a
+                                                        friend
                                                     </option>
                                                 </select>
                                             </div>
@@ -1304,52 +1331,47 @@ function App() {
                                                     Some road noise
                                                 </option>
                                                 <option value="steady_noise">
-                                                    Loud but steady (trucks, generators)
+                                                    Loud but steady (trucks,
+                                                    generators)
                                                 </option>
                                                 <option value="party">
                                                     Party / unpredictable
-                                                </option>
-                                                <option value="unknown">
-                                                    Not sure / didn&apos;t notice
                                                 </option>
                                             </select>
                                         </div>
 
                                         <div className="form-group">
-                                            <label>Photo URLs (comma-separated)</label>
+                                            <label>
+                                                Extra photo URLs (comma
+                                                separated)
+                                            </label>
                                             <input
                                                 type="text"
                                                 name="photoUrls"
                                                 value={spotForm.photoUrls}
                                                 onChange={handleSpotInputChange}
-                                                placeholder="https://..., https://..."
+                                                placeholder="https://image1.jpg, https://image2.jpg"
                                             />
                                             <p className="tiny-text">
-                                                You can paste image URLs here. These will
-                                                be stored alongside any uploaded photos.
+                                                Optional: paste direct image
+                                                links if you already host photos
+                                                somewhere.
                                             </p>
                                         </div>
 
                                         <div className="form-group">
-                                            <label>Upload photos (optional)</label>
+                                            <label>Upload photos</label>
                                             <input
                                                 type="file"
-                                                multiple
                                                 accept="image/*"
+                                                multiple
                                                 onChange={handleSpotFileChange}
                                             />
                                             <p className="tiny-text">
-                                                Select 1–4 photos from your device. They&apos;ll
-                                                be uploaded to Supabase storage and linked to
-                                                this spot.
+                                                You can add up to a few photos
+                                                from your phone or laptop.
                                             </p>
                                         </div>
-
-                                        {errorMsg && (
-                                            <p className="error-text">
-                                                {errorMsg}
-                                            </p>
-                                        )}
 
                                         <div className="form-actions">
                                             <button
@@ -1357,8 +1379,7 @@ function App() {
                                                 className="btn-secondary"
                                                 onClick={cancelAddOrEdit}
                                                 disabled={
-                                                    savingSpot ||
-                                                    uploadingPhotos
+                                                    savingSpot || uploadingPhotos
                                                 }
                                             >
                                                 Cancel
@@ -1367,8 +1388,7 @@ function App() {
                                                 type="submit"
                                                 className="btn-primary"
                                                 disabled={
-                                                    savingSpot ||
-                                                    uploadingPhotos
+                                                    savingSpot || uploadingPhotos
                                                 }
                                             >
                                                 {uploadingPhotos
@@ -1381,36 +1401,26 @@ function App() {
                                             </button>
                                         </div>
                                     </form>
-                                )}
-                            </div>
-                        )}
+                                </>
+                            )}
+                        </div>
 
-                        {/* VIEW SPOT + REVIEWS */}
-                        {!adding && selectedSpot && (
+                        {/* SPOT DETAIL + REVIEWS CARD */}
+                        {selectedSpot && (
                             <div className="sheet-section">
                                 <div className="sheet-title-row">
                                     <div className="sheet-title-main">
                                         <h2 className="sheet-title">
-                                            {getSpotTypeIcon(
-                                                selectedSpot.spot_type
-                                            )}{" "}
-                                            {selectedSpot.name}
+                                            {selectedSpot.name.toUpperCase()}
                                         </h2>
                                         <button
                                             type="button"
-                                            className={`fav-btn ${isFavorite(selectedSpot.id)
+                                            className={`fav-btn ${favoriteIds.has(selectedSpot.id)
                                                     ? "fav-btn--active"
                                                     : ""
                                                 }`}
                                             onClick={() =>
-                                                toggleFavorite(
-                                                    selectedSpot.id
-                                                )
-                                            }
-                                            aria-label={
-                                                isFavorite(selectedSpot.id)
-                                                    ? "Remove favorite"
-                                                    : "Add favorite"
+                                                toggleFavorite(selectedSpot.id)
                                             }
                                         >
                                             ⭐
@@ -1419,11 +1429,7 @@ function App() {
                                     <button
                                         type="button"
                                         className="sheet-close"
-                                        onClick={() => {
-                                            setSelectedSpotId(null);
-                                            setIsSheetOpen(false);
-                                        }}
-                                        aria-label="Close details"
+                                        onClick={() => setSelectedSpotId(null)}
                                     >
                                         ✕
                                     </button>
@@ -1435,15 +1441,27 @@ function App() {
 
                                 <div className="sheet-meta-row">
                                     <span>
-                                        {selectedSpotAverageRating
-                                            ? `⭐ ${selectedSpotAverageRating.toFixed(
+                                        {selectedSpot.overnight_allowed
+                                            ? "✅ Overnight parking OK"
+                                            : "🚫 Overnight not allowed or unclear"}
+                                    </span>
+                                    <span>
+                                        {selectedSpot.has_bathroom
+                                            ? "🚻 Bathrooms available"
+                                            : "🚻 No bathrooms listed"}
+                                    </span>
+                                    <span>
+                                        {selectedSpot.avgRating != null
+                                            ? `★ ${selectedSpot.avgRating.toFixed(
                                                 1
-                                            )}`
+                                            )} (${selectedSpot.reviewCount} reviews)`
                                             : "No reviews yet"}
                                     </span>
                                     <span>
-                                        Cell: {selectedSpot.cell_signal ?? 0}/5 · Safety:{" "}
-                                        {selectedSpot.safety_rating ?? 0}/5 · Noise:{" "}
+                                        Cell:{" "}
+                                        {selectedSpot.cell_signal ?? 0}/5 ·
+                                        Safety: {selectedSpot.safety_rating ?? 0}
+                                        /5 · Noise:{" "}
                                         {formatNoiseLevel(
                                             selectedSpot.noise_level
                                         )}
@@ -1483,158 +1501,131 @@ function App() {
                                     >
                                         Open in Maps
                                     </button>
-
-                                    {session &&
-                                        selectedSpot.created_by &&
-                                        session.user?.id ===
-                                        selectedSpot.created_by && (
-                                            <button
-                                                type="button"
-                                                className="btn-secondary"
-                                                onClick={() =>
-                                                    beginEditingSpot(
-                                                        selectedSpot
-                                                    )
-                                                }
-                                            >
-                                                Edit spot
-                                            </button>
-                                        )}
+                                    <button
+                                        type="button"
+                                        className="btn-secondary"
+                                        onClick={() =>
+                                            startEditingSpot(selectedSpot)
+                                        }
+                                    >
+                                        Edit spot
+                                    </button>
                                 </div>
 
                                 <div className="reviews-block">
                                     <h3 className="reviews-title">Reviews</h3>
+
                                     {selectedSpotReviews.length === 0 && (
                                         <p className="small-text">
-                                            No reviews yet. Be the first!
+                                            No reviews yet. Be the first to
+                                            share your experience.
                                         </p>
                                     )}
 
-                                    {selectedSpotReviews
-                                        .slice(0, 6)
-                                        .map((rev) => (
-                                            <div
-                                                key={rev.id}
-                                                className="review-card"
-                                            >
-                                                <div className="review-header">
-                                                    <span className="review-rating">
-                                                        {"⭐".repeat(
-                                                            rev.rating || 0
-                                                        )}
-                                                    </span>
-                                                    <span className="review-name">
-                                                        {rev.nickname ||
-                                                            "Anon"}
-                                                    </span>
-                                                    <span className="review-date">
-                                                        {rev.created_at
-                                                            ? new Date(
-                                                                rev
-                                                                    .created_at
-                                                            ).toLocaleDateString()
-                                                            : ""}
-                                                    </span>
-                                                </div>
-                                                <p className="review-comment">
-                                                    {rev.comment}
-                                                </p>
+                                    {selectedSpotReviews.map((rev) => (
+                                        <div key={rev.id} className="review-card">
+                                            <div className="review-header">
+                                                <span className="review-rating">
+                                                    ★ {rev.rating}/5
+                                                </span>
+                                                <span className="review-name">
+                                                    {rev.nickname || "Anonymous"}
+                                                </span>
+                                                <span className="review-date">
+                                                    {rev.created_at
+                                                        ? new Date(
+                                                            rev.created_at
+                                                        ).toLocaleDateString()
+                                                        : ""}
+                                                </span>
                                             </div>
-                                        ))}
-                                </div>
-
-                                <form
-                                    className="review-form"
-                                    onSubmit={handleAddReview}
-                                >
-                                    <h3 className="reviews-title">
-                                        Add a Review
-                                    </h3>
-
-                                    <div className="form-group inline">
-                                        <div>
-                                            <label>Rating (1–5)</label>
-                                            <select
-                                                name="rating"
-                                                value={reviewForm.rating}
-                                                onChange={
-                                                    handleReviewInputChange
-                                                }
-                                            >
-                                                <option value="5">
-                                                    5 - Amazing
-                                                </option>
-                                                <option value="4">
-                                                    4 - Good
-                                                </option>
-                                                <option value="3">
-                                                    3 - Okay
-                                                </option>
-                                                <option value="2">
-                                                    2 - Sketchy
-                                                </option>
-                                                <option value="1">
-                                                    1 - Avoid
-                                                </option>
-                                            </select>
+                                            <p className="review-comment">
+                                                {rev.comment}
+                                            </p>
                                         </div>
-                                        <div>
-                                            <label>Nickname (optional)</label>
-                                            <input
-                                                type="text"
-                                                name="nickname"
-                                                value={reviewForm.nickname}
-                                                onChange={
-                                                    handleReviewInputChange
-                                                }
-                                                placeholder="Trail name / alias"
+                                    ))}
+
+                                    <form
+                                        className="review-form"
+                                        onSubmit={handleAddReview}
+                                    >
+                                        <h3 className="reviews-title">
+                                            Add a Review
+                                        </h3>
+
+                                        <div className="form-group inline">
+                                            <div>
+                                                <label>Rating (1–5)</label>
+                                                <select
+                                                    name="rating"
+                                                    value={reviewForm.rating}
+                                                    onChange={
+                                                        handleReviewInputChange
+                                                    }
+                                                >
+                                                    <option value="1">1</option>
+                                                    <option value="2">2</option>
+                                                    <option value="3">3</option>
+                                                    <option value="4">4</option>
+                                                    <option value="5">5</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label>Nickname (optional)</label>
+                                                <input
+                                                    type="text"
+                                                    name="nickname"
+                                                    value={reviewForm.nickname}
+                                                    onChange={
+                                                        handleReviewInputChange
+                                                    }
+                                                    placeholder="E.g. Vanlife Sam"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="form-group">
+                                            <label>Comment</label>
+                                            <textarea
+                                                name="comment"
+                                                value={reviewForm.comment}
+                                                onChange={handleReviewInputChange}
+                                                placeholder="What was this spot like?"
+                                                rows={3}
                                             />
                                         </div>
-                                    </div>
 
-                                    <div className="form-group">
-                                        <label>Comment</label>
-                                        <textarea
-                                            name="comment"
-                                            value={reviewForm.comment}
-                                            onChange={handleReviewInputChange}
-                                            placeholder="How was this spot? Safe? Noisy? Clean?"
-                                            rows={3}
-                                        />
-                                    </div>
+                                        {reviewError && (
+                                            <p className="error-text">
+                                                {reviewError}
+                                            </p>
+                                        )}
 
-                                    {reviewError && (
-                                        <p className="error-text">
-                                            {reviewError}
-                                        </p>
-                                    )}
-
-                                    <div className="form-actions">
-                                        <button
-                                            type="submit"
-                                            className="btn-primary"
-                                            disabled={savingReview}
-                                        >
-                                            {savingReview
-                                                ? "Sending…"
-                                                : "Post Review"}
-                                        </button>
-                                    </div>
-                                </form>
+                                        <div className="form-actions">
+                                            <button
+                                                type="submit"
+                                                className="btn-primary"
+                                                disabled={savingReview}
+                                            >
+                                                {savingReview
+                                                    ? "Sending…"
+                                                    : "Post Review"}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
                             </div>
                         )}
 
-                        {/* DEFAULT STATE */}
-                        {!adding && !selectedSpot && (
-                            <div className="sheet-section">
-                                <h2 className="sheet-title">Explore the map</h2>
-                                <p className="small-text">
-                                    Tap a pin to see details &amp; reviews, or tap{" "}
-                                    <strong>Add Spot</strong> to share a safe place
-                                    you&apos;ve stayed.
-                                </p>
-                            </div>
-                        )}
+                        {/* EXPLORE CARD */}
+                        <div className="sheet-section">
+                            <h2 className="sheet-title">Explore the map</h2>
+                            <p className="sheet-subtitle">
+                                Tap a pin to see details &amp; reviews, or tap{" "}
+                                <strong>Add Spot</strong> to share a safe place
+                                you&apos;ve stayed.
+                            </p>
+                        </div>
 
                         {/* ACCOUNT CARD */}
                         <div className="sheet-section">
@@ -1643,26 +1634,29 @@ function App() {
                             {session ? (
                                 <>
                                     <p className="small-text">
-                                        Signed in as{" "}
-                                        <strong>{session.user.email}</strong>.
+                                        Logged in as{" "}
+                                        <strong>
+                                            {session.user.email || "you"}
+                                        </strong>
+                                        .
                                     </p>
-                                    <p className="small-text">
-                                        Login is optional – spots and reviews still
-                                        work without an account. We use your account
-                                        so you can edit your own spots later.
-                                    </p>
-                                    <div className="form-actions">
-                                        <button
-                                            type="button"
-                                            className="btn-secondary"
-                                            onClick={handleLogout}
-                                        >
-                                            Sign out
-                                        </button>
-                                    </div>
+                                    <button
+                                        type="button"
+                                        className="btn-secondary"
+                                        onClick={handleLogout}
+                                    >
+                                        Log out
+                                    </button>
                                 </>
                             ) : (
-                                <form onSubmit={handleLogin} className="spot-form">
+                                <form
+                                    className="spot-form"
+                                    onSubmit={handleLogin}
+                                >
+                                    <p className="small-text">
+                                        Sign in with a magic link so you can add
+                                        and edit your own spots. No passwords.
+                                    </p>
                                     <div className="form-group">
                                         <label>Email for login</label>
                                         <input
@@ -1675,9 +1669,7 @@ function App() {
                                         />
                                     </div>
                                     {authError && (
-                                        <p className="error-text">
-                                            {authError}
-                                        </p>
+                                        <p className="error-text">{authError}</p>
                                     )}
                                     <div className="form-actions">
                                         <button
@@ -1749,46 +1741,44 @@ function App() {
                                 .
                             </p>
                         </div>
-                    </aside>
-                </div>
-
-                {/* Mobile drawer backdrop (only visible on mobile via CSS) */}
-                {isSheetOpen && (
-                    <button
-                        type="button"
-                        className="mobile-sheet-backdrop"
-                        onClick={() => setIsSheetOpen(false)}
-                        aria-label="Close spots panel"
-                    />
-                )}
-
-                {/* Mobile drawer toggle pill (visible only on mobile via CSS) */}
-                <button
-                    type="button"
-                    className="mobile-spots-toggle"
-                    onClick={() => setIsSheetOpen((open) => !open)}
-                >
-                    {isSheetOpen ? "Hide spots" : "Spots & details"}
-                    <span aria-hidden="true">
-                        {isSheetOpen ? "▾" : "▴"}
-                    </span>
-                </button>
-
-                {/* Full-screen photo viewer */}
-                {activePhoto && (
-                    <div
-                        className="photo-modal"
-                        onClick={() => setActivePhoto(null)}
-                    >
-                        <div className="photo-modal-inner">
-                            <img
-                                src={activePhoto.url}
-                                alt={activePhoto.name}
-                            />
-                        </div>
                     </div>
-                )}
+                </aside>
             </div>
+
+            {/* Mobile slide-over controls */}
+            <button
+                type="button"
+                className="mobile-sheet-backdrop"
+                aria-label="Close spots drawer"
+                onClick={() => setIsMobileSheetOpen(false)}
+            />
+            <button
+                type="button"
+                className="mobile-spots-toggle"
+                onClick={() => setIsMobileSheetOpen((open) => !open)}
+                aria-label={
+                    isMobileSheetOpen
+                        ? "Hide spots and details"
+                        : "Show spots and details"
+                }
+            >
+                {isMobileSheetOpen ? "Hide spots ▾" : "Spots & details ▴"}
+            </button>
+
+            {/* Full-screen photo viewer */}
+            {activePhoto && (
+                <div
+                    className="photo-modal"
+                    onClick={() => setActivePhoto(null)}
+                >
+                    <div className="photo-modal-inner">
+                        <img
+                            src={activePhoto.url}
+                            alt={activePhoto.name}
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
